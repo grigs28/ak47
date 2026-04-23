@@ -41,7 +41,7 @@
 </div>
 
 <div class="row mb-4">
-    <div class="col-md-6">
+    <div class="col-md-3">
         <div class="card">
             <div class="card-body">
                 <h6 class="text-muted">开始时间</h6>
@@ -49,11 +49,27 @@
             </div>
         </div>
     </div>
-    <div class="col-md-6">
+    <div class="col-md-3">
         <div class="card">
             <div class="card-body">
                 <h6 class="text-muted">已用时间</h6>
                 <p class="mb-0 fs-5" id="elapsed-time">-</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-body">
+                <h6 class="text-muted">每分钟文件数</h6>
+                <p class="mb-0 fs-5" id="scan-speed">-</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-body">
+                <h6 class="text-muted">预计剩余</h6>
+                <p class="mb-0 fs-5" id="scan-eta">-</p>
             </div>
         </div>
     </div>
@@ -125,7 +141,7 @@ function updateStatus() {
             const s = statusMap[status] || {text: status || 'idle', cls: 'bg-secondary'};
             statusBadge.innerHTML = '<span class="badge ' + s.cls + ' fs-6">' + s.text + '</span>';
 
-            // 开始时间和已用时间
+            // 开始时间、已用时间、速度、预计剩余
             if (data.started_at) {
                 const startTime = new Date(data.started_at);
                 document.getElementById('start-time').textContent = startTime.toLocaleString();
@@ -138,9 +154,31 @@ function updateStatus() {
                 if (mins > 0 || hours > 0) elapsedStr += mins + '分';
                 elapsedStr += secs + '秒';
                 document.getElementById('elapsed-time').textContent = elapsedStr;
+
+                // 每分钟文件数
+                const scanned = data.scanned_files || 0;
+                const total = data.total_files || 0;
+                const speed = elapsed > 0 ? (scanned / elapsed * 60).toFixed(1) : 0;
+                document.getElementById('scan-speed').textContent = speed + ' 个/分';
+
+                // 预计剩余时间
+                const remaining = total - scanned;
+                if (speed > 0 && remaining > 0) {
+                    const etaSeconds = Math.floor(remaining / (speed / 60));
+                    const etaHours = Math.floor(etaSeconds / 3600);
+                    const etaMins = Math.floor((etaSeconds % 3600) / 60);
+                    let etaStr = '';
+                    if (etaHours > 0) etaStr += etaHours + '时';
+                    if (etaMins > 0 || etaHours > 0) etaStr += etaMins + '分';
+                    document.getElementById('scan-eta').textContent = etaStr;
+                } else {
+                    document.getElementById('scan-eta').textContent = '-';
+                }
             } else {
                 document.getElementById('start-time').textContent = '-';
                 document.getElementById('elapsed-time').textContent = '-';
+                document.getElementById('scan-speed').textContent = '-';
+                document.getElementById('scan-eta').textContent = '-';
             }
 
             if (status === 'completed') {
