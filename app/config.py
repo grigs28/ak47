@@ -11,5 +11,5 @@ class Config:
     DB_DSN = f"host={DB_HOST} port={DB_PORT} dbname={DB_NAME} user={DB_USER} password='{DB_PASSWORD}'"
 
     REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
-    YZ_LOGIN_URL = os.environ.get('YZ_LOGIN_URL', 'http://192.168.0.19:5555')
+    YZ_LOGIN_URL = os.environ.get('YZ_LOGIN_URL', 'http://192.168.0.18:5551')
     FLASK_ENV = os.environ.get('FLASK_ENV', 'development')
