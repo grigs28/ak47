@@ -85,7 +85,7 @@ BEGIN
         INSERT INTO system_config (key, value, description) VALUES ('paddleocr_base_url', 'http://192.168.0.19:5553', 'PaddleOCR-ui 地址');
     END IF;
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'paddleocr_api_key') THEN
-        INSERT INTO system_config (key, value, description) VALUES ('paddleocr_api_key', 'ak_e10b412d5cd68eeef303c3f561405dfb07d7e122123df8f97d0ecb30e5624d', 'PaddleOCR API Key');
+        INSERT INTO system_config (key, value, description) VALUES ('paddleocr_api_key', '', 'PaddleOCR API Key');
     END IF;
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'qwen_base_url') THEN
         INSERT INTO system_config (key, value, description) VALUES ('qwen_base_url', 'http://192.168.0.18:5566/v1', 'qwen-3 API 地址');
