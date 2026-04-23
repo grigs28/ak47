@@ -117,16 +117,22 @@ class Scanner:
         return {'status': 'completed', 'scanned': scanned, 'matched': matched}
 
     def _scan_directory_multi_thread(self, dirname, pdfs):
-        """3线程扫描单个目录"""
-        # 将文件分成3组
-        file_groups = self._split_files_for_threads(pdfs)
+        """多线程扫描单个目录，线程数由系统配置决定（默认3线程）"""
+        from app.models import SystemConfig
+        num_threads = int(SystemConfig.get('scan_threads', '3'))
+        num_threads = max(1, min(num_threads, 10))  # 限制1-10线程
+
+        # 将文件分成N组
+        file_groups = self._split_files_for_threads(pdfs, num_threads)
 
         scanned = 0
         matched = 0
         paused = False
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            # 提交3个线程任务
+        print(f"[INFO] 项目 {dirname} 启动 {num_threads} 线程扫描")
+
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            # 提交N个线程任务
             futures = {
                 executor.submit(self._thread_worker, dirname, files, thread_id): thread_id
                 for thread_id, files in file_groups.items()
@@ -149,19 +155,38 @@ class Scanner:
 
         return {'status': 'completed', 'scanned': scanned, 'matched': matched}
 
-    def _split_files_for_threads(self, pdfs):
-        """将PDF文件按范围分配给3个线程
-        A: 0-3, B: 4-6, C: 7-9，以此类推
+    def _split_files_for_threads(self, pdfs, num_threads=3):
+        """将PDF文件按范围分配给N个线程
+        均分策略：每10个文件为一组，按线程数均分
+        2线程: A(0-4), B(5-9)
+        3线程: A(0-3), B(4-6), C(7-9)
+        4线程: A(0-2), B(3-4), C(5-7), D(8-9)
         """
-        groups = {'A': [], 'B': [], 'C': []}
+        # 生成线程ID列表
+        thread_ids = [chr(ord('A') + i) for i in range(num_threads)]
+        groups = {tid: [] for tid in thread_ids}
+
+        # 每10个文件为一组，计算每个线程分到的数量
+        files_per_cycle = 10
+        files_per_thread = files_per_cycle // num_threads
+        remainder = files_per_cycle % num_threads
+
         for idx, pdf in enumerate(pdfs):
-            remainder = idx % 10
-            if remainder <= 3:
-                groups['A'].append(pdf)
-            elif remainder <= 6:
-                groups['B'].append(pdf)
-            else:
-                groups['C'].append(pdf)
+            pos_in_cycle = idx % files_per_cycle
+
+            # 计算该位置属于哪个线程
+            assigned_thread = 0
+            boundary = 0
+            for t in range(num_threads):
+                # 前 remainder 个线程多分1个
+                chunk_size = files_per_thread + (1 if t < remainder else 0)
+                boundary += chunk_size
+                if pos_in_cycle < boundary:
+                    assigned_thread = t
+                    break
+
+            groups[thread_ids[assigned_thread]].append(pdf)
+
         return groups
 
     def _thread_worker(self, dirname, files, thread_id):
