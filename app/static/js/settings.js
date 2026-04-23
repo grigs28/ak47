@@ -3,6 +3,7 @@ const CONFIG_GROUPS = {
     ai: ['qwen_base_url', 'qwen_api_key', 'qwen_model', 'ai_enabled'],
     auth: ['yz_login_url'],
     db: ['db_host', 'db_port', 'db_name', 'db_user', 'db_password'],
+    scan: ['scan_threads'],
 };
 
 let allConfigs = {};
@@ -53,6 +54,25 @@ function createConfigElement(c) {
         switchDiv.appendChild(checkbox);
         switchDiv.appendChild(label);
         div.appendChild(switchDiv);
+    } else if (c.key === 'scan_threads') {
+        // 扫描线程数：下拉选择 1-5
+        const label = document.createElement('label');
+        label.className = 'form-label small fw-semibold';
+        label.textContent = c.description || c.key;
+        const select = document.createElement('select');
+        select.className = 'form-select form-select-sm';
+        select.id = 'cfg-' + c.key;
+        for (let i = 1; i <= 5; i++) {
+            const option = document.createElement('option');
+            option.value = String(i);
+            option.textContent = i + ' 线程';
+            if (String(i) === (c.value || '3')) {
+                option.selected = true;
+            }
+            select.appendChild(option);
+        }
+        div.appendChild(label);
+        div.appendChild(select);
     } else {
         const label = document.createElement('label');
         label.className = 'form-label small fw-semibold';

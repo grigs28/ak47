@@ -120,7 +120,7 @@ class Scanner:
         """多线程扫描单个目录，线程数由系统配置决定（默认3线程）"""
         from app.models import SystemConfig
         num_threads = int(SystemConfig.get('scan_threads', '3'))
-        num_threads = max(1, min(num_threads, 10))  # 限制1-10线程
+        num_threads = max(1, min(num_threads, 5))  # 限制1-5线程
 
         # 将文件分成N组
         file_groups = self._split_files_for_threads(pdfs, num_threads)

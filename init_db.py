@@ -102,8 +102,8 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'yz_login_url') THEN
         INSERT INTO system_config (key, value, description) VALUES ('yz_login_url', 'http://192.168.0.18:5551', '登录服务地址');
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'scan_concurrency') THEN
-        INSERT INTO system_config (key, value, description) VALUES ('scan_concurrency', '1', '并发数');
+    IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'scan_threads') THEN
+        INSERT INTO system_config (key, value, description) VALUES ('scan_threads', '3', '扫描线程数（1-5）');
     END IF;
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'ai_enabled') THEN
         INSERT INTO system_config (key, value, description) VALUES ('ai_enabled', 'true', '启用 AI 辅助匹配');
