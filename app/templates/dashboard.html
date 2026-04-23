@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+
+{% block title %}仪表盘 - PDF 扫描器{% endblock %}
+
+{% block content %}
+<div id="notification-area"></div>
+
+<div class="row mb-4">
+    <div class="col-md-4">
+        <div class="card stat-card bg-primary text-white">
+            <div class="card-body">
+                <h5>总目录数</h5>
+                <h2 id="total-dirs">-</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card stat-card bg-info text-white">
+            <div class="card-body">
+                <h5>已扫描</h5>
+                <h2 id="scanned-files">-</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card stat-card bg-success text-white">
+            <div class="card-body">
+                <h5>匹配数</h5>
+                <h2 id="matched-files">-</h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h5>扫描进度</h5>
+        <div class="progress mb-2">
+            <div id="progress-bar" class="progress-bar" role="progressbar" style="width: 0%">0%</div>
+        </div>
+        <p class="text-muted" id="current-file">当前：-</p>
+        <div class="btn-group">
+            <button id="btn-start" class="btn btn-success" onclick="startScan()">开始扫描</button>
+            <button id="btn-pause" class="btn btn-warning" onclick="pauseScan()">暂停</button>
+            <button id="btn-resume" class="btn btn-info" onclick="resumeScan()">恢复</button>
+            <button id="btn-reset" class="btn btn-danger" onclick="resetScan()">重置</button>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h5>最近匹配文件</h5>
+    </div>
+    <div class="card-body">
+        <table class="table table-striped">
+            <thead>
+                <tr><th>文件名</th><th>目录</th><th>AI匹配</th><th>操作</th></tr>
+            </thead>
+            <tbody id="recent-files"></tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let statusInterval;
+
+function updateStatus() {
+    fetch('/api/scan/status')
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('total-dirs').textContent = data.total_dirs || 0;
+            document.getElementById('scanned-files').textContent = data.scanned_files || 0;
+            document.getElementById('matched-files').textContent = data.matched_files || 0;
+
+            const total = data.total_files || 1;
+            const scanned = data.scanned_files || 0;
+            const pct = Math.round((scanned / total) * 100);
+            document.getElementById('progress-bar').style.width = pct + '%';
+            document.getElementById('progress-bar').textContent = pct + '%';
+            document.getElementById('current-file').textContent = '当前：' + (data.current_file || '-');
+
+            const status = data.status;
+            document.getElementById('btn-start').disabled = status === 'running';
+            document.getElementById('btn-pause').disabled = status !== 'running';
+            document.getElementById('btn-resume').disabled = status !== 'paused';
+
+            if (status === 'completed') {
+                showNotification('扫描完成！共发现 ' + data.matched_files + ' 个匹配文件', 'success');
+            }
+        });
+
+    fetch('/api/files?size=5')
+        .then(r => r.json())
+        .then(data => {
+            const tbody = document.getElementById('recent-files');
+            tbody.innerHTML = data.files.map(f => `
+                <tr>
+                    <td>${escapeHtml(f.filename)}</td>
+                    <td>${escapeHtml(f.directory)}</td>
+                    <td>${f.ai_confidence ? (f.ai_confidence * 100).toFixed(0) + '%' : '-'}</td>
+                    <td><a href="/files/${f.id}" class="btn btn-sm btn-outline-primary">查看</a></td>
+                </tr>
+            `).join('');
+        });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function startScan() {
+    fetch('/api/scan/start', {method: 'POST'}).then(() => updateStatus());
+}
+
+function pauseScan() {
+    fetch('/api/scan/pause', {method: 'POST'}).then(() => updateStatus());
+}
+
+function resumeScan() {
+    fetch('/api/scan/resume', {method: 'POST'}).then(() => updateStatus());
+}
+
+function resetScan() {
+    if (!confirm('确定重置扫描进度？')) return;
+    fetch('/api/scan/reset', {method: 'POST'}).then(() => updateStatus());
+}
+
+function showNotification(msg, type) {
+    const area = document.getElementById('notification-area');
+    const div = document.createElement('div');
+    div.className = `alert alert-${type} alert-dismissible fade show`;
+    div.innerHTML = msg + '<button type="button" class="btn-close" data-bs-dismiss="alert"></button>';
+    area.appendChild(div);
+}
+
+updateStatus();
+statusInterval = setInterval(updateStatus, 3000);
+</script>
+{% endblock %}

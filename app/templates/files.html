@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+
+{% block title %}文件列表 - PDF 扫描器{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3>匹配文件列表</h3>
+    <div>
+        <button class="btn btn-success" onclick="batchSelect(true)">批量选中</button>
+        <button class="btn btn-outline-secondary" onclick="batchSelect(false)">取消选中</button>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="row g-2">
+            <div class="col-md-3">
+                <select id="filter-dir" class="form-select" onchange="loadFiles()">
+                    <option value="">所有目录</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <select id="filter-ai" class="form-select" onchange="loadFiles()">
+                    <option value="">AI 匹配状态</option>
+                    <option value="true">已匹配</option>
+                    <option value="false">未匹配</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <select id="filter-selected" class="form-select" onchange="loadFiles()">
+                    <option value="">选中状态</option>
+                    <option value="true">已选中</option>
+                    <option value="false">未选中</option>
+                </select>
+            </div>
+        </div>
+    </div>
+</div>
+
+<table class="table table-hover">
+    <thead>
+        <tr>
+            <th><input type="checkbox" id="select-all" onchange="toggleAll()"></th>
+            <th>文件名</th>
+            <th>目录</th>
+            <th>大小</th>
+            <th>AI 匹配</th>
+            <th>【】检测</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody id="file-list"></tbody>
+</table>
+
+<nav>
+    <ul class="pagination" id="pagination"></ul>
+</nav>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentPage = 1;
+let selectedIds = new Set();
+
+function loadFiles(page = 1) {
+    currentPage = page;
+    const params = new URLSearchParams({page, size: 20});
+    const dir = document.getElementById('filter-dir').value;
+    const ai = document.getElementById('filter-ai').value;
+    const sel = document.getElementById('filter-selected').value;
+    if (dir) params.append('directory', dir);
+    if (ai) params.append('ai_matched', ai);
+    if (sel) params.append('selected', sel);
+
+    fetch('/api/files?' + params)
+        .then(r => r.json())
+        .then(data => {
+            const tbody = document.getElementById('file-list');
+            tbody.innerHTML = data.files.map(f => `
+                <tr class="${f.selected ? 'file-selected' : ''}">
+                    <td><input type="checkbox" value="${f.id}" ${selectedIds.has(f.id) ? 'checked' : ''} onchange="toggleSelect(${f.id})"></td>
+                    <td><a href="/files/${f.id}">${escapeHtml(f.filename)}</a></td>
+                    <td>${escapeHtml(f.directory)}</td>
+                    <td>${formatSize(f.file_size)}</td>
+                    <td>${f.ai_confidence ? (f.ai_confidence * 100).toFixed(0) + '%' : '-'}</td>
+                    <td>${f.has_brackets ? '是' : '否'}</td>
+                    <td>
+                        <a href="/api/files/${f.id}/preview" target="_blank" class="btn btn-sm btn-outline-primary">预览</a>
+                        <a href="/api/files/${f.id}/md" class="btn btn-sm btn-outline-success">下载 MD</a>
+                    </td>
+                </tr>
+            `).join('');
+
+            renderPagination(data.total, data.page, data.size);
+        });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function formatSize(bytes) {
+    if (!bytes) return '-';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let i = 0;
+    while (bytes >= 1024 && i < units.length - 1) {
+        bytes /= 1024;
+        i++;
+    }
+    return bytes.toFixed(1) + ' ' + units[i];
+}
+
+function renderPagination(total, page, size) {
+    const pages = Math.ceil(total / size);
+    let html = '';
+    for (let i = 1; i <= pages; i++) {
+        html += `<li class="page-item ${i === page ? 'active' : ''}"><a class="page-link" href="#" onclick="loadFiles(${i})">${i}</a></li>`;
+    }
+    document.getElementById('pagination').innerHTML = html;
+}
+
+function toggleSelect(id) {
+    if (selectedIds.has(id)) selectedIds.delete(id);
+    else selectedIds.add(id);
+}
+
+function toggleAll() {
+    const checked = document.getElementById('select-all').checked;
+    document.querySelectorAll('#file-list input[type="checkbox"]').forEach(cb => {
+        cb.checked = checked;
+        const id = parseInt(cb.value);
+        if (checked) selectedIds.add(id);
+        else selectedIds.delete(id);
+    });
+}
+
+function batchSelect(selected) {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return alert('请先选择文件');
+
+    fetch('/api/files/batch-select', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({file_ids: ids, selected}),
+    }).then(() => {
+        selectedIds.clear();
+        loadFiles(currentPage);
+    });
+}
+
+fetch('/api/browse')
+    .then(r => r.json())
+    .then(data => {
+        const select = document.getElementById('filter-dir');
+        data.items.forEach(item => {
+            const opt = document.createElement('option');
+            opt.value = item.name;
+            opt.textContent = item.name;
+            select.appendChild(opt);
+        });
+    });
+
+loadFiles();
+</script>
+{% endblock %}

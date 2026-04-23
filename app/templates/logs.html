@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}操作日志 - PDF 扫描器{% endblock %}
+
+{% block content %}
+<h3>操作日志</h3>
+<table class="table table-striped">
+    <thead>
+        <tr><th>时间</th><th>用户</th><th>操作</th><th>详情</th></tr>
+    </thead>
+    <tbody id="log-list"></tbody>
+</table>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+fetch('/api/logs')
+    .then(r => r.json())
+    .then(data => {
+        document.getElementById('log-list').innerHTML = data.logs.map(l => `
+            <tr>
+                <td>${new Date(l.created_at).toLocaleString()}</td>
+                <td>${escapeHtml(l.username)}</td>
+                <td>${escapeHtml(l.action)}</td>
+                <td><pre class="mb-0">${escapeHtml(JSON.stringify(l.detail, null, 2))}</pre></td>
+            </tr>
+        `).join('');
+    });
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+{% endblock %}
