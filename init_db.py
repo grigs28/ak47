@@ -146,7 +146,8 @@ CREATE TABLE IF NOT EXISTS temp_files (
     status          VARCHAR(20) DEFAULT 'pending',
 
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (file_path)
 );
 
 CREATE INDEX IF NOT EXISTS idx_temp_files_design_number ON temp_files(设计编号);
@@ -169,17 +170,16 @@ ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS 图名 VARCHAR(500);
 ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS 图号 VARCHAR(50);
 ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS 图别 VARCHAR(50);
 ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS json_result JSONB;
-ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS is_instruction BOOLEAN DEFAULT FALSE;
+ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS is_instruction BOOLEAN DEFAULT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_scanned_files_design_number ON scanned_files(设计编号);
 """
 
 def init():
-    conn = psycopg2.connect(DSN)
-    conn.autocommit = True
-    with conn.cursor() as cur:
-        cur.execute(INIT_SQL)
-    conn.close()
+    with psycopg2.connect(DSN) as conn:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(INIT_SQL)
     print("Database initialized.")
 
 if __name__ == '__main__':
