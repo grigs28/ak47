@@ -16,6 +16,7 @@ class Scanner:
         # 线程锁，用于保护共享状态
         self._progress_lock = threading.Lock()
         self._design_lock = threading.Lock()
+        self._current_file = None
 
     def scan_all(self):
         # 加载设计编号缓存到内存
@@ -29,29 +30,16 @@ class Scanner:
 
         # 读取排除目录配置
         exclude_dirs = self._get_exclude_dirs()
+        print(f"[INFO] 排除目录: {exclude_dirs}")
 
         # 按 mtime 最新优先，每次取 20 个项目
         dirs, total_dirs = self.smb.list_dirs(page=1, size=20)
 
         # 过滤排除目录
         dirs = [(d, m) for d, m in dirs if d not in exclude_dirs]
+        print(f"[INFO] 过滤后目录数: {len(dirs)}")
 
-        # 快速估算每个目录的PDF文件数，按文件数降序排列（大目录优先）
-        dir_with_count = []
-        for dirname, mtime in dirs:
-            try:
-                # 浅层快速统计，限制深度3层避免卡住
-                pdfs = self.smb.list_pdfs(dirname, recursive=True, max_depth=3)
-                count = len(pdfs)
-            except Exception:
-                count = 0
-            dir_with_count.append((dirname, mtime, count))
-
-        # 按PDF文件数降序排列（大目录优先），文件数相同则按mtime最新优先
-        dir_with_count.sort(key=lambda x: (-x[2], -x[1]))
-        dirs = [(d[0], d[1]) for d in dir_with_count]
-
-        estimated_files = sum(d[2] for d in dir_with_count)
+        estimated_files = 0
 
         ScanProgress.update(
             status='running',
@@ -80,8 +68,11 @@ class Scanner:
                 started_at='NOW()',
             )
 
-            # 递归获取所有PDF（最大深度256层）
+            # 递归获取所有PDF（最大深度256层，限制单个目录最多1000个文件避免卡住）
             pdfs = self.smb.list_pdfs(dirname, recursive=True, max_depth=256)
+            if len(pdfs) > 1000:
+                print(f"[WARN] 项目 {dirname} 有 {len(pdfs)} 个PDF，限制处理前1000个")
+                pdfs = pdfs[:1000]
 
             if not pdfs:
                 print(f"[INFO] 项目 {dirname} 没有PDF文件")
@@ -222,6 +213,8 @@ class Scanner:
                 return {'status': 'paused', 'scanned': scanned, 'matched': matched}
 
             try:
+                # 更新当前文件（全局）
+                self._current_file = pdf['path']
                 result = self._process_single_pdf_thread_safe(pdf, dirname, thread_id)
                 scanned += 1
                 if result:
@@ -234,7 +227,7 @@ class Scanner:
             with self._progress_lock:
                 ScanProgress.update(
                     current_dir=dirname,
-                    current_file=pdf['path'],
+                    current_file=self._current_file,
                     scanned_files=scanned,
                     matched_files=matched,
                 )
