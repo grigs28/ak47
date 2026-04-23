@@ -159,6 +159,7 @@ CREATE TABLE IF NOT EXISTS design_cache (
     工程名称        VARCHAR(1000),
     has_instruction BOOLEAN DEFAULT FALSE,
     instruction_count INTEGER DEFAULT 0,
+    first_seen_directory VARCHAR(500),
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -192,6 +193,19 @@ BEGIN
 END $$;
 
 CREATE INDEX IF NOT EXISTS idx_scanned_files_design_number ON scanned_files(设计编号);
+
+CREATE TABLE IF NOT EXISTS scanned_directories (
+    directory       VARCHAR(500) PRIMARY KEY,
+    status          VARCHAR(20) DEFAULT 'pending',
+    total_files     INTEGER DEFAULT 0,
+    scanned_files   INTEGER DEFAULT 0,
+    matched_files   INTEGER DEFAULT 0,
+    started_at      TIMESTAMP,
+    completed_at    TIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_scanned_directories_status ON scanned_directories(status);
 """
 
 def init():

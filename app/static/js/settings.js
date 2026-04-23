@@ -1,8 +1,6 @@
 const CONFIG_GROUPS = {
-    smb: ['smb_server', 'smb_share', 'smb_username', 'smb_password', 'smb_domain', 'smb_mount_path'],
     ocr: ['paddleocr_base_url', 'paddleocr_api_key'],
     ai: ['qwen_base_url', 'qwen_api_key', 'qwen_model', 'ai_enabled'],
-    scan: ['scan_concurrency', 'gbt_standard'],
     auth: ['yz_login_url'],
     db: ['db_host', 'db_port', 'db_name', 'db_user', 'db_password'],
 };
@@ -87,10 +85,6 @@ function saveAll() {
         const toast = new bootstrap.Toast(document.getElementById('saveToast'));
         toast.show();
     });
-}
-
-function testSMB() {
-    testConnection('smb', 'SMB', '/api/config/test-smb');
 }
 
 function testOCR() {

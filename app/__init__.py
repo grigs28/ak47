@@ -21,6 +21,13 @@ def create_app():
 
     app.teardown_appcontext(close_db)
 
+    # 启动时检查：如果上次状态是 running，重置为 idle（程序异常退出）
+    with app.app_context():
+        from app.models import ScanProgress
+        progress = ScanProgress.get()
+        if progress and progress.get('status') == 'running':
+            ScanProgress.update(status='idle')
+
     from app.views import bp as views_bp
     from app.api import bp as api_bp
     from app.auth import bp as auth_bp

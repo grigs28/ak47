@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify, session
 from app.auth import admin_required
 from app.models import ScanProgress, ScannedFile, SystemConfig, OperationLog
-from app.vision.models import TempFile, DesignCache
+from app.vision.models import TempFile, DesignCache, ScannedDirectory
 from app.tasks import scan_task
 from app.smb import SMBManager
 from app.ocr import OCRClient
@@ -23,6 +23,25 @@ def scan_start():
     if progress['status'] == 'running':
         return jsonify({'error': '扫描已在运行'}), 400
 
+    # 自动启动 Celery Worker（如果未运行）
+    import subprocess
+    try:
+        result = subprocess.run(['pgrep', '-f', 'celery.*celery_worker'], capture_output=True, text=True)
+        if not result.stdout.strip():
+            # Worker 未运行，自动启动
+            import os
+            env = os.environ.copy()
+            env['DB_PASSWORD'] = os.environ.get('DB_PASSWORD', 'Slnwg123$')
+            subprocess.Popen(
+                ['celery', '-A', 'celery_worker', 'worker', '-l', 'info', '-c', '1'],
+                stdout=open('/tmp/celery.log', 'a'),
+                stderr=subprocess.STDOUT,
+                env=env,
+                start_new_session=True,
+            )
+    except Exception:
+        pass  # 启动失败不影响主流程
+
     ScanProgress.update(status='running')
     task = scan_task.delay()
 
@@ -42,7 +61,7 @@ def scan_pause():
     if progress['status'] != 'running':
         return jsonify({'error': '扫描未在运行'}), 400
 
-    ScanProgress.update(status='paused', paused_at='CURRENT_TIMESTAMP')
+    ScanProgress.update(status='paused', paused_at='NOW()')
 
     OperationLog.create(
         user_id=session.get('user_id', 0),
@@ -199,13 +218,30 @@ def file_download_md(file_id):
 @admin_required
 def browse():
     path = request.args.get('path', '')
+    page = request.args.get('page', 1, type=int)
+    size = request.args.get('size', 100, type=int)
 
     try:
         if not path:
-            dirs = SMBManager.list_dirs()
+            dirs, total = SMBManager.list_dirs(page=page, size=size)
+            # 获取目录状态
+            items = []
+            for d in dirs:
+                name = d[0]
+                status_row = ScannedDirectory.get(name)
+                status = status_row['status'] if status_row else 'pending'
+                items.append({
+                    'name': name,
+                    'mtime': d[1],
+                    'type': 'directory',
+                    'status': status,
+                })
             return jsonify({
                 'type': 'root',
-                'items': [{'name': d[0], 'number': d[1], 'type': 'directory'} for d in dirs],
+                'items': items,
+                'total': total,
+                'page': page,
+                'size': size,
             })
         else:
             pdfs = SMBManager.list_pdfs(path)
@@ -249,11 +285,23 @@ def config_update(key):
 @admin_required
 def test_smb():
     try:
+        if SMBManager.is_mounted():
+            SMBManager.umount()
+            return jsonify({'success': False, 'message': 'SMB 已卸载'})
         SMBManager.mount()
         is_mounted = SMBManager.is_mounted()
         return jsonify({'success': is_mounted, 'message': 'SMB 挂载成功' if is_mounted else 'SMB 挂载失败'})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
+
+@bp.route('/config/smb-status', methods=['GET'])
+@admin_required
+def smb_status():
+    try:
+        is_mounted = SMBManager.is_mounted()
+        return jsonify({'mounted': is_mounted})
+    except Exception as e:
+        return jsonify({'mounted': False, 'error': str(e)}), 500
 
 @bp.route('/config/test-ocr', methods=['POST'])
 @admin_required

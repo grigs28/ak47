@@ -18,6 +18,10 @@ class TempFile:
         return query(f"SELECT * FROM {cls.TABLE} WHERE id = %s", (file_id,), fetchone=True)
 
     @classmethod
+    def get_by_path(cls, file_path):
+        return query(f"SELECT * FROM {cls.TABLE} WHERE file_path = %s", (file_path,), fetchone=True)
+
+    @classmethod
     def update(cls, file_id, **kwargs):
         if not kwargs:
             return
@@ -57,9 +61,18 @@ class DesignCache:
         conn = get_conn()
         with conn.cursor() as cur:
             if kwargs:
-                fields = ', '.join(f"{k} = %s" for k in kwargs)
-                values = list(kwargs.values()) + [design_number]
-                cur.execute(f"UPDATE {cls.TABLE} SET {fields}, updated_at = CURRENT_TIMESTAMP WHERE 设计编号 = %s", values)
+                # 处理 CURRENT_TIMESTAMP 特殊值
+                fields = []
+                values = []
+                for k, v in kwargs.items():
+                    if v == 'CURRENT_TIMESTAMP':
+                        fields.append(f"{k} = CURRENT_TIMESTAMP")
+                    else:
+                        fields.append(f"{k} = %s")
+                        values.append(v)
+                fields_str = ', '.join(fields)
+                values.append(design_number)
+                cur.execute(f"UPDATE {cls.TABLE} SET {fields_str}, updated_at = CURRENT_TIMESTAMP WHERE 设计编号 = %s", values)
             if cur.rowcount == 0:
                 columns = ['设计编号'] + list(kwargs.keys())
                 placeholders = ', '.join('%s' for _ in columns)
@@ -68,9 +81,80 @@ class DesignCache:
         conn.commit()
 
     @classmethod
+    def should_skip(cls, design_number):
+        """判断该设计编号是否应跳过（已在其他项目标记）"""
+        row = cls.get(design_number)
+        if row and row.get('has_instruction'):
+            return True
+        return False
+
+    @classmethod
     def list(cls, page=1, size=20):
         offset = (page - 1) * size
         rows = query(f"SELECT * FROM {cls.TABLE} ORDER BY updated_at DESC LIMIT %s OFFSET %s",
                      (size, offset), fetchall=True)
         total = query(f"SELECT COUNT(*) as cnt FROM {cls.TABLE}", fetchone=True)
         return rows, total['cnt'] if total else 0
+
+
+class ScannedDirectory:
+    TABLE = 'scanned_directories'
+
+    @classmethod
+    def get(cls, directory):
+        return query(f"SELECT * FROM {cls.TABLE} WHERE directory = %s", (directory,), fetchone=True)
+
+    @classmethod
+    def create_or_update(cls, directory, **kwargs):
+        from app.db import get_conn
+        conn = get_conn()
+        with conn.cursor() as cur:
+            if kwargs:
+                # 处理 CURRENT_TIMESTAMP 特殊值
+                fields = []
+                values = []
+                for k, v in kwargs.items():
+                    if v == 'CURRENT_TIMESTAMP':
+                        fields.append(f"{k} = CURRENT_TIMESTAMP")
+                    else:
+                        fields.append(f"{k} = %s")
+                        values.append(v)
+                fields_str = ', '.join(fields)
+                values.append(directory)
+                cur.execute(f"UPDATE {cls.TABLE} SET {fields_str}, updated_at = CURRENT_TIMESTAMP WHERE directory = %s", values)
+            if cur.rowcount == 0:
+                columns = ['directory'] + list(kwargs.keys())
+                placeholders = ', '.join('%s' for _ in columns)
+                values = [directory] + list(kwargs.values())
+                cur.execute(f"INSERT INTO {cls.TABLE} ({', '.join(columns)}) VALUES ({placeholders})", values)
+        conn.commit()
+
+    @classmethod
+    def list(cls, status=None, page=1, size=100):
+        where = []
+        params = []
+        if status:
+            where.append("status = %s")
+            params.append(status)
+        where_clause = f"WHERE {' AND '.join(where)}" if where else ""
+        offset = (page - 1) * size
+        rows = query(f"SELECT * FROM {cls.TABLE} {where_clause} ORDER BY updated_at DESC LIMIT %s OFFSET %s",
+                     (*params, size, offset), fetchall=True)
+        total = query(f"SELECT COUNT(*) as cnt FROM {cls.TABLE} {where_clause}", params, fetchone=True)
+        return rows, total['cnt'] if total else 0
+
+    @classmethod
+    def mark_completed(cls, directory):
+        # 使用 NOW() 而不是字符串 'CURRENT_TIMESTAMP'
+        from app.db import get_conn
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute(f"UPDATE {cls.TABLE} SET status = 'completed', completed_at = NOW(), updated_at = NOW() WHERE directory = %s", (directory,))
+            if cur.rowcount == 0:
+                cur.execute(f"INSERT INTO {cls.TABLE} (directory, status, completed_at, updated_at) VALUES (%s, 'completed', NOW(), NOW())", (directory,))
+        conn.commit()
+
+    @classmethod
+    def is_completed(cls, directory):
+        row = cls.get(directory)
+        return row is not None and row.get('status') == 'completed'

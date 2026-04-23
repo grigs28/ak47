@@ -12,11 +12,6 @@
         </button>
     </li>
     <li class="nav-item" role="presentation">
-        <button class="nav-link" id="params-tab" data-bs-toggle="tab" data-bs-target="#params" type="button" role="tab">
-            <i class="bi bi-sliders me-1"></i>扫描参数
-        </button>
-    </li>
-    <li class="nav-item" role="presentation">
         <button class="nav-link" id="control-tab" data-bs-toggle="tab" data-bs-target="#control" type="button" role="tab">
             <i class="bi bi-play-circle me-1"></i>开始扫描
         </button>
@@ -26,41 +21,91 @@
 <div class="tab-content" id="scanTabContent">
     <!-- SMB 文件源 -->
     <div class="tab-pane fade show active" id="smb" role="tabpanel">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <span><i class="bi bi-hdd-network me-2"></i>SMB 连接状态</span>
-                <button class="btn btn-sm btn-outline-primary" onclick="testSMB()">
-                    <i class="bi bi-arrow-clockwise me-1"></i>刷新
-                </button>
-            </div>
-            <div class="card-body">
-                <div id="smb-status" class="mb-3">
-                    <div class="d-flex align-items-center">
-                        <span class="badge bg-secondary me-2" id="smb-badge">检查中...</span>
-                        <span id="smb-message">-</span>
+        <div class="row g-3">
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-hdd-network me-2"></i>SMB 配置</span>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-primary" onclick="saveSMBConfig()">
+                                <i class="bi bi-save me-1"></i>保存配置
+                            </button>
+                            <button class="btn btn-success" id="btn-mount" onclick="toggleMount()" type="button">
+                                <i class="bi bi-plug me-1"></i><span id="btn-mount-text">手动挂载</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold">服务器地址</label>
+                            <input type="text" class="form-control form-control-sm" id="smb-server" placeholder="192.168.0.79">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold">共享路径</label>
+                            <input type="text" class="form-control form-control-sm" id="smb-share" placeholder="abb/FS/10/D$/tbmdata/data/ftpdata">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold">用户名</label>
+                            <input type="text" class="form-control form-control-sm" id="smb-username" placeholder="">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold">密码</label>
+                            <input type="password" class="form-control form-control-sm" id="smb-password" placeholder="">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold">域（可选）</label>
+                            <input type="text" class="form-control form-control-sm" id="smb-domain" placeholder="">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold">并发数</label>
+                            <input type="number" class="form-control form-control-sm" id="scan-concurrency" placeholder="1" min="1" max="10">
+                        </div>
+                        <div class="mb-0">
+                            <label class="form-label small fw-semibold">标准名称</label>
+                            <input type="text" class="form-control form-control-sm" id="gbt-standard" placeholder="GBT 50378-2019(2024年版)">
+                        </div>
+                    </div>
+                    <div class="card-footer bg-transparent">
+                        <span id="smb-save-result" class="small"></span>
                     </div>
                 </div>
-                <div id="smb-dirs-section" class="d-none">
-                    <h6 class="mt-3">目录列表（按最新修改排序）</h6>
-                    <div class="table-responsive">
-                        <table class="table table-sm table-striped">
-                            <thead><tr><th>目录名</th><th>修改时间</th></tr></thead>
-                            <tbody id="smb-dirs"></tbody>
-                        </table>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-folder me-2"></i>目录列表</span>
+                        <div class="d-flex align-items-center gap-2">
+                            <span id="smb-status-inline" class="small"></span>
+                            <button class="btn btn-sm btn-outline-primary" onclick="testSMB(true)">
+                                <i class="bi bi-arrow-clockwise me-1"></i>刷新
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body p-0 d-flex flex-column">
+                        <div id="smb-dirs-section" class="d-none flex-grow-1 d-flex flex-column">
+                            <div class="px-3 pt-3 pb-2 d-flex justify-content-between align-items-center">
+                                <h6 class="mb-0">按最新修改排序<small class="text-muted" id="smb-dirs-count"></small></h6>
+                            </div>
+                            <div class="table-responsive flex-grow-1" style="overflow-y: auto;">
+                                <table class="table table-sm table-striped mb-0">
+                                    <thead style="position: sticky; top: 0; background: white; z-index: 1;"><tr><th>目录名</th><th>修改时间</th><th>状态</th></tr></thead>
+                                    <tbody id="smb-dirs"></tbody>
+                                </table>
+                            </div>
+                            <div class="px-3 py-2 d-flex justify-content-between align-items-center border-top">
+                                <span class="small text-muted" id="smb-page-info"></span>
+                                <div class="btn-group btn-group-sm">
+                                    <button class="btn btn-outline-secondary" id="smb-prev" onclick="loadSMBDirs(currentPage - 1)">上一页</button>
+                                    <button class="btn btn-outline-secondary" id="smb-next" onclick="loadSMBDirs(currentPage + 1)">下一页</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="smb-not-mounted" class="flex-grow-1 d-flex flex-column justify-content-center align-items-center text-muted">
+                            <i class="bi bi-hdd-network fs-1"></i>
+                            <p class="mt-2 mb-0">请先挂载 SMB 以查看目录列表</p>
+                        </div>
                     </div>
                 </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 扫描参数 -->
-    <div class="tab-pane fade" id="params" role="tabpanel">
-        <div class="card">
-            <div class="card-header">
-                <i class="bi bi-sliders me-2"></i>扫描配置
-            </div>
-            <div class="card-body">
-                <div id="scan-configs"></div>
             </div>
         </div>
     </div>
@@ -156,6 +201,7 @@
 {% block extra_js %}
 <script>
 let statusInterval;
+let lastNotifiedStatus = null;
 
 function updateStatus() {
     fetch('/api/scan/status')
@@ -166,12 +212,22 @@ function updateStatus() {
             document.getElementById('scanned-files').textContent = data.scanned_files || 0;
             document.getElementById('matched-files').textContent = data.matched_files || 0;
 
-            const total = data.total_files || 1;
+            const total = data.total_files || 0;
             const scanned = data.scanned_files || 0;
-            const pct = Math.round((scanned / total) * 100);
+            let pct, barText;
+            if (total === 0 && scanned === 0) {
+                pct = 0;
+                barText = '0%';
+            } else if (total === 0 && scanned > 0) {
+                pct = 0;
+                barText = scanned + ' 个文件';
+            } else {
+                pct = Math.round((scanned / total) * 100);
+                barText = pct + '%';
+            }
             const bar = document.getElementById('progress-bar');
             bar.style.width = pct + '%';
-            bar.textContent = pct + '%';
+            bar.textContent = barText;
             if (data.status === 'running') {
                 bar.classList.add('progress-bar-animated');
             } else {
@@ -188,8 +244,13 @@ function updateStatus() {
             document.getElementById('btn-pause').disabled = status !== 'running';
             document.getElementById('btn-resume').disabled = status !== 'paused';
 
-            if (status === 'completed') {
+            if (status === 'completed' && lastNotifiedStatus !== 'completed') {
+                lastNotifiedStatus = 'completed';
                 showNotification('扫描完成！共发现 ' + data.matched_files + ' 个匹配文件', 'success');
+            } else if (status === 'running') {
+                lastNotifiedStatus = 'running';
+            } else if (status === 'idle') {
+                lastNotifiedStatus = 'idle';
             }
         });
 
@@ -212,67 +273,212 @@ function updateStatus() {
         });
 }
 
-function testSMB() {
-    const badge = document.getElementById('smb-badge');
-    const msg = document.getElementById('smb-message');
-    badge.className = 'badge bg-warning me-2';
-    badge.textContent = '检查中...';
-    msg.textContent = '';
+let smbConnected = false;
+
+function checkSMBStatus() {
+    const inline = document.getElementById('smb-status-inline');
+    if (inline) inline.textContent = '检查中...';
+
+    fetch('/api/config/smb-status')
+        .then(r => r.json())
+        .then(data => {
+            if (data.mounted) {
+                if (inline) {
+                    inline.textContent = '已连接';
+                    inline.className = 'small text-success';
+                }
+                smbConnected = true;
+                updateMountButton(true);
+                loadSMBDirs(1);
+            } else {
+                if (inline) {
+                    inline.textContent = '未连接';
+                    inline.className = 'small text-muted';
+                }
+                smbConnected = false;
+                updateMountButton(false);
+                document.getElementById('smb-dirs-section').classList.add('d-none');
+                document.getElementById('smb-not-mounted').classList.remove('d-none');
+            }
+        })
+        .catch(() => {
+            if (inline) {
+                inline.textContent = '未连接';
+                inline.className = 'small text-muted';
+            }
+            smbConnected = false;
+            updateMountButton(false);
+            document.getElementById('smb-dirs-section').classList.add('d-none');
+            document.getElementById('smb-not-mounted').classList.remove('d-none');
+        });
+}
+
+function testSMB(forceRefresh) {
+    const inline = document.getElementById('smb-status-inline');
+    if (inline) inline.textContent = '检查中...';
 
     fetch('/api/config/test-smb', {method: 'POST'})
         .then(r => r.json())
         .then(data => {
             if (data.success) {
-                badge.className = 'badge bg-success me-2';
-                badge.textContent = '已连接';
-                msg.textContent = data.message;
-                loadSMBDirs();
+                if (inline) inline.textContent = '已连接';
+                if (inline) inline.className = 'small text-success';
+                if (!smbConnected || forceRefresh) {
+                    loadSMBDirs(1);
+                }
+                smbConnected = true;
+                updateMountButton(true);
             } else {
-                badge.className = 'badge bg-danger me-2';
-                badge.textContent = '未连接';
-                msg.textContent = data.message;
+                if (inline) inline.textContent = data.message || '未连接';
+                if (inline) inline.className = 'small text-muted';
+                smbConnected = false;
+                updateMountButton(false);
+                document.getElementById('smb-dirs-section').classList.add('d-none');
+                document.getElementById('smb-not-mounted').classList.remove('d-none');
             }
         })
         .catch(e => {
-            badge.className = 'badge bg-danger me-2';
-            badge.textContent = '错误';
-            msg.textContent = e.message;
+            if (inline) inline.textContent = '错误';
+            if (inline) inline.className = 'small text-danger';
+            smbConnected = false;
+            updateMountButton(false);
+            document.getElementById('smb-dirs-section').classList.add('d-none');
+            document.getElementById('smb-not-mounted').classList.remove('d-none');
         });
 }
 
-function loadSMBDirs() {
-    fetch('/api/browse')
+let currentPage = 1;
+let totalPages = 1;
+
+function loadSMBDirs(page) {
+    if (!page || page < 1) page = 1;
+    currentPage = page;
+
+    fetch('/api/browse?page=' + page + '&size=100')
         .then(r => r.json())
         .then(data => {
             const tbody = document.getElementById('smb-dirs');
             if (data.items) {
                 tbody.innerHTML = data.items.map(d => {
                     const mtime = d.mtime ? new Date(d.mtime * 1000).toLocaleString() : '-';
-                    return '<tr><td>' + escapeHtml(d.name) + '</td><td>' + mtime + '</td></tr>';
+                    let statusBadge = '';
+                    if (d.status === 'completed') {
+                        statusBadge = '<span class="badge bg-success">已完成</span>';
+                    } else if (d.status === 'scanning') {
+                        statusBadge = '<span class="badge bg-warning text-dark">扫描中</span>';
+                    } else {
+                        statusBadge = '<span class="badge bg-secondary">待扫描</span>';
+                    }
+                    return '<tr><td>' + escapeHtml(d.name) + '</td><td>' + mtime + '</td><td>' + statusBadge + '</td></tr>';
                 }).join('');
                 document.getElementById('smb-dirs-section').classList.remove('d-none');
+                document.getElementById('smb-not-mounted').classList.add('d-none');
+                document.getElementById('smb-dirs-count').textContent = ' 共 ' + (data.total || 0) + ' 个';
+
+                totalPages = Math.ceil((data.total || 0) / 100);
+                document.getElementById('smb-page-info').textContent = '第 ' + page + ' / ' + totalPages + ' 页';
+                document.getElementById('smb-prev').disabled = page <= 1;
+                document.getElementById('smb-next').disabled = page >= totalPages;
             }
         })
         .catch(() => {
             document.getElementById('smb-dirs-section').classList.add('d-none');
+            document.getElementById('smb-not-mounted').classList.remove('d-none');
         });
 }
 
-function loadScanConfigs() {
+function loadSMBForm() {
     fetch('/api/config')
         .then(r => r.json())
         .then(data => {
-            const container = document.getElementById('scan-configs');
-            const scanKeys = ['scan_concurrency', 'gbt_standard'];
-            const configs = data.configs.filter(c => scanKeys.includes(c.key));
-            if (configs.length === 0) {
-                container.innerHTML = '<p class="text-muted">暂无扫描参数配置</p>';
-                return;
+            const configs = {};
+            data.configs.forEach(c => configs[c.key] = c.value || '');
+            document.getElementById('smb-server').value = configs['smb_server'] || '';
+            document.getElementById('smb-share').value = configs['smb_share'] || '';
+            document.getElementById('smb-username').value = configs['smb_username'] || '';
+            document.getElementById('smb-password').value = configs['smb_password'] || '';
+            document.getElementById('smb-domain').value = configs['smb_domain'] || '';
+            document.getElementById('scan-concurrency').value = configs['scan_concurrency'] || '1';
+            document.getElementById('gbt-standard').value = configs['gbt_standard'] || '';
+        });
+}
+
+function saveSMBConfig() {
+    const keys = ['smb_server', 'smb_share', 'smb_username', 'smb_password', 'smb_domain', 'scan_concurrency', 'gbt_standard'];
+    const ids = ['smb-server', 'smb-share', 'smb-username', 'smb-password', 'smb-domain', 'scan-concurrency', 'gbt-standard'];
+    const promises = keys.map((key, i) => {
+        const value = document.getElementById(ids[i]).value;
+        return fetch('/api/config/' + key, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({value}),
+        });
+    });
+    Promise.all(promises).then(() => {
+        const span = document.getElementById('smb-save-result');
+        span.textContent = '已保存';
+        span.className = 'ms-2 small text-success';
+        setTimeout(() => { span.textContent = ''; }, 2000);
+    }).catch(() => {
+        const span = document.getElementById('smb-save-result');
+        span.textContent = '保存失败';
+        span.className = 'ms-2 small text-danger';
+    });
+}
+
+function updateMountButton(mounted) {
+    const btn = document.getElementById('btn-mount');
+    const txt = document.getElementById('btn-mount-text');
+    if (mounted) {
+        btn.className = 'btn btn-warning';
+        txt.textContent = '卸载';
+    } else {
+        btn.className = 'btn btn-success';
+        txt.textContent = '手动挂载';
+    }
+}
+
+function toggleMount() {
+    const inline = document.getElementById('smb-status-inline');
+    const isMounted = document.getElementById('btn-mount-text').textContent === '卸载';
+    if (inline) inline.textContent = isMounted ? '卸载中...' : '挂载中...';
+
+    fetch('/api/config/test-smb', {method: 'POST'})
+        .then(r => {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
+        .then(data => {
+            console.log('toggleMount response:', data);
+            if (data.success) {
+                if (inline) {
+                    inline.textContent = '已连接';
+                    inline.className = 'small text-success';
+                }
+                smbConnected = true;
+                updateMountButton(true);
+                loadSMBDirs(1);
+            } else {
+                if (inline) {
+                    inline.textContent = data.message || '未连接';
+                    inline.className = 'small text-muted';
+                }
+                smbConnected = false;
+                updateMountButton(false);
+                document.getElementById('smb-dirs-section').classList.add('d-none');
+                document.getElementById('smb-not-mounted').classList.remove('d-none');
             }
-            container.innerHTML = configs.map(c => {
-                return '<div class="mb-3"><label class="form-label fw-semibold">' + escapeHtml(c.description || c.key) + '</label>' +
-                       '<input type="text" class="form-control" value="' + escapeHtml(c.value || '') + '" readonly></div>';
-            }).join('');
+        })
+        .catch(e => {
+            console.error('toggleMount error:', e);
+            if (inline) {
+                inline.textContent = '错误: ' + e.message;
+                inline.className = 'small text-danger';
+            }
+            smbConnected = false;
+            updateMountButton(false);
+            document.getElementById('smb-dirs-section').classList.add('d-none');
+            document.getElementById('smb-not-mounted').classList.remove('d-none');
         });
 }
 
@@ -312,12 +518,15 @@ function showNotification(msg, type) {
 }
 
 // Tab 切换时加载对应内容
-document.getElementById('smb-tab').addEventListener('shown.bs.tab', testSMB);
-document.getElementById('params-tab').addEventListener('shown.bs.tab', loadScanConfigs);
+document.getElementById('smb-tab').addEventListener('shown.bs.tab', function() {
+    loadSMBForm();
+    checkSMBStatus();
+});
 document.getElementById('control-tab').addEventListener('shown.bs.tab', updateStatus);
 
 // 初始加载
-testSMB();
+loadSMBForm();
+checkSMBStatus();
 updateStatus();
 statusInterval = setInterval(updateStatus, 3000);
 </script>

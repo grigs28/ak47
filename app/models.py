@@ -15,9 +15,17 @@ class ScanProgress:
     def update(cls, **kwargs):
         if not kwargs:
             return
-        fields = ', '.join(f"{k} = %s" for k in kwargs)
-        values = list(kwargs.values())
-        execute(f"UPDATE {cls.TABLE} SET {fields}, updated_at = CURRENT_TIMESTAMP WHERE id = 1", values)
+        # 处理 CURRENT_TIMESTAMP 特殊值（openGauss 不支持作为参数）
+        fields = []
+        values = []
+        for k, v in kwargs.items():
+            if v == 'CURRENT_TIMESTAMP' or v == 'NOW()':
+                fields.append(f"{k} = CURRENT_TIMESTAMP")
+            else:
+                fields.append(f"{k} = %s")
+                values.append(v)
+        fields_str = ', '.join(fields)
+        execute(f"UPDATE {cls.TABLE} SET {fields_str}, updated_at = CURRENT_TIMESTAMP WHERE id = 1", values)
 
     @classmethod
     def reset(cls):

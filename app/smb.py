@@ -100,8 +100,8 @@ class SMBManager:
         return result.returncode == 0
 
     @classmethod
-    def list_dirs(cls):
-        """列出挂载根目录下所有子目录，按修改时间降序排列"""
+    def list_dirs(cls, page=1, size=100):
+        """列出挂载根目录下所有子目录，按修改时间降序排列，支持分页"""
         mount_path = cls.get_mount_path()
         if not cls.is_mounted():
             raise RuntimeError("SMB not mounted")
@@ -115,11 +115,15 @@ class SMBManager:
 
         # 按修改时间降序排列（最新的在前面）
         dirs.sort(key=lambda x: x[1], reverse=True)
-        return dirs
+
+        total = len(dirs)
+        start = (page - 1) * size
+        end = start + size
+        return dirs[start:end], total
 
     @classmethod
-    def list_pdfs(cls, directory):
-        """列出指定目录下所有 PDF 文件"""
+    def list_pdfs(cls, directory, recursive=True, max_depth=5):
+        """列出指定目录下所有 PDF 文件，默认递归子目录，最大深度5层"""
         mount_path = cls.get_mount_path()
         dir_path = os.path.join(mount_path, directory)
 
@@ -129,15 +133,38 @@ class SMBManager:
             raise ValueError("Invalid directory path")
 
         pdfs = []
-        for name in sorted(os.listdir(real_dir)):
-            if name.lower().endswith('.pdf'):
-                full = os.path.join(real_dir, name)
-                if os.path.isfile(full):
-                    pdfs.append({
-                        'name': name,
-                        'size': os.path.getsize(full),
-                        'path': os.path.join(directory, name),
-                    })
+        if recursive:
+            base_depth = real_dir.rstrip(os.sep).count(os.sep)
+            for root, dirs, files in os.walk(real_dir):
+                # 检查当前深度
+                current_depth = root.rstrip(os.sep).count(os.sep)
+                if current_depth - base_depth >= max_depth:
+                    del dirs[:]  # 不继续深入
+                    continue
+                for name in sorted(files):
+                    if name.lower().endswith('.pdf'):
+                        full = os.path.join(root, name)
+                        # 计算相对路径
+                        rel_path = os.path.relpath(full, mount_path)
+                        try:
+                            size = os.path.getsize(full)
+                        except OSError:
+                            size = 0
+                        pdfs.append({
+                            'name': name,
+                            'size': size,
+                            'path': rel_path,
+                        })
+        else:
+            for name in sorted(os.listdir(real_dir)):
+                if name.lower().endswith('.pdf'):
+                    full = os.path.join(real_dir, name)
+                    if os.path.isfile(full):
+                        pdfs.append({
+                            'name': name,
+                            'size': os.path.getsize(full),
+                            'path': os.path.join(directory, name),
+                        })
         return pdfs
 
     @staticmethod
