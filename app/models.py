@@ -83,9 +83,15 @@ class SystemConfig:
 
     @classmethod
     def set(cls, key, value):
-        execute(f"INSERT INTO {cls.TABLE} (key, value) VALUES (%s, %s) "
-                f"ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP",
-                (key, value))
+        # openGauss 不支持 ON CONFLICT，使用先更新后插入
+        from app.db import get_conn
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute(f"UPDATE {cls.TABLE} SET value = %s, updated_at = CURRENT_TIMESTAMP WHERE key = %s",
+                        (value, key))
+            if cur.rowcount == 0:
+                cur.execute(f"INSERT INTO {cls.TABLE} (key, value) VALUES (%s, %s)", (key, value))
+        conn.commit()
 
     @classmethod
     def all(cls):
@@ -96,8 +102,10 @@ class OperationLog:
 
     @classmethod
     def create(cls, user_id, username, action, detail=None):
-        execute(f"INSERT INTO {cls.TABLE} (user_id, username, action, detail) VALUES (%s, %s, %s, %s)",
-                (user_id, username, action, detail))
+        import json
+        detail_json = json.dumps(detail) if detail else None
+        execute(f"INSERT INTO {cls.TABLE} (user_id, username, action, detail) VALUES (%s, %s, %s, %s::jsonb)",
+                (user_id, username, action, detail_json))
 
     @classmethod
     def list(cls, page=1, size=50):

@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, session
 from app.auth import admin_required
 from app.models import ScanProgress, ScannedFile, SystemConfig, OperationLog
 from app.tasks import scan_task
@@ -26,8 +26,8 @@ def scan_start():
     task = scan_task.delay()
 
     OperationLog.create(
-        user_id=request.session.get('user_id', 0),
-        username=request.session.get('username', ''),
+        user_id=session.get('user_id', 0),
+        username=session.get('username', ''),
         action='start_scan',
         detail={'task_id': task.id},
     )
@@ -44,8 +44,8 @@ def scan_pause():
     ScanProgress.update(status='paused', paused_at='CURRENT_TIMESTAMP')
 
     OperationLog.create(
-        user_id=request.session.get('user_id', 0),
-        username=request.session.get('username', ''),
+        user_id=session.get('user_id', 0),
+        username=session.get('username', ''),
         action='pause_scan',
     )
 
@@ -62,8 +62,8 @@ def scan_resume():
     task = scan_task.delay()
 
     OperationLog.create(
-        user_id=request.session.get('user_id', 0),
-        username=request.session.get('username', ''),
+        user_id=session.get('user_id', 0),
+        username=session.get('username', ''),
         action='resume_scan',
         detail={'task_id': task.id},
     )
@@ -76,8 +76,8 @@ def scan_reset():
     ScanProgress.reset()
 
     OperationLog.create(
-        user_id=request.session.get('user_id', 0),
-        username=request.session.get('username', ''),
+        user_id=session.get('user_id', 0),
+        username=session.get('username', ''),
         action='reset_scan',
     )
 
@@ -136,8 +136,8 @@ def file_select(file_id):
     ScannedFile.update(file_id, selected=selected)
 
     OperationLog.create(
-        user_id=request.session.get('user_id', 0),
-        username=request.session.get('username', ''),
+        user_id=session.get('user_id', 0),
+        username=session.get('username', ''),
         action='select_file' if selected else 'deselect_file',
         detail={'file_id': file_id},
     )
@@ -234,8 +234,8 @@ def config_update(key):
     SystemConfig.set(key, value)
 
     OperationLog.create(
-        user_id=request.session.get('user_id', 0),
-        username=request.session.get('username', ''),
+        user_id=session.get('user_id', 0),
+        username=session.get('username', ''),
         action='update_config',
         detail={'key': key},
     )

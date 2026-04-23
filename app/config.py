@@ -13,3 +13,6 @@ class Config:
     REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
     YZ_LOGIN_URL = os.environ.get('YZ_LOGIN_URL', 'http://192.168.0.18:5551')
     FLASK_ENV = os.environ.get('FLASK_ENV', 'development')
+
+    # 管理员用户名列表（逗号分隔）
+    ADMIN_USERS = os.environ.get('ADMIN_USERS', 'grigs').split(',')

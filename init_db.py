@@ -67,46 +67,49 @@ END $$;
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'smb_server') THEN
-        INSERT INTO system_config (key, value, description) VALUES ('smb_server', '192.168.0.79', 'SMB 服务器地址');
+        INSERT INTO system_config (key, value, description) VALUES ('smb_server', '192.168.0.79', '服务器地址');
     END IF;
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'smb_share') THEN
-        INSERT INTO system_config (key, value, description) VALUES ('smb_share', 'abb/FS/10/D$/tbmdata/data/ftpdata', 'SMB 共享路径');
+        INSERT INTO system_config (key, value, description) VALUES ('smb_share', 'abb/FS/10/D$/tbmdata/data/ftpdata', '共享路径');
     END IF;
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'smb_username') THEN
-        INSERT INTO system_config (key, value, description) VALUES ('smb_username', '', 'SMB 用户名');
+        INSERT INTO system_config (key, value, description) VALUES ('smb_username', '', '用户名');
     END IF;
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'smb_password') THEN
-        INSERT INTO system_config (key, value, description) VALUES ('smb_password', '', 'SMB 密码');
+        INSERT INTO system_config (key, value, description) VALUES ('smb_password', '', '密码');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'smb_domain') THEN
+        INSERT INTO system_config (key, value, description) VALUES ('smb_domain', '', '域（可选）');
     END IF;
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'smb_mount_path') THEN
-        INSERT INTO system_config (key, value, description) VALUES ('smb_mount_path', '/mnt/smb/ftpdata', 'SMB 容器内挂载点');
+        INSERT INTO system_config (key, value, description) VALUES ('smb_mount_path', '', '容器内挂载点（自动生成后锁定）');
     END IF;
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'paddleocr_base_url') THEN
-        INSERT INTO system_config (key, value, description) VALUES ('paddleocr_base_url', 'http://192.168.0.19:5553', 'PaddleOCR-ui 地址');
+        INSERT INTO system_config (key, value, description) VALUES ('paddleocr_base_url', 'http://192.168.0.19:5553', 'API 地址');
     END IF;
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'paddleocr_api_key') THEN
-        INSERT INTO system_config (key, value, description) VALUES ('paddleocr_api_key', '', 'PaddleOCR API Key');
+        INSERT INTO system_config (key, value, description) VALUES ('paddleocr_api_key', '', 'API Key');
     END IF;
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'qwen_base_url') THEN
-        INSERT INTO system_config (key, value, description) VALUES ('qwen_base_url', 'http://192.168.0.18:5566/v1', 'qwen-3 API 地址');
+        INSERT INTO system_config (key, value, description) VALUES ('qwen_base_url', 'http://192.168.0.18:5566/v1', 'API 地址');
     END IF;
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'qwen_api_key') THEN
-        INSERT INTO system_config (key, value, description) VALUES ('qwen_api_key', '', 'qwen-3 API Key');
+        INSERT INTO system_config (key, value, description) VALUES ('qwen_api_key', '', 'API Key');
     END IF;
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'qwen_model') THEN
-        INSERT INTO system_config (key, value, description) VALUES ('qwen_model', 'qwen3', 'qwen-3 模型名');
+        INSERT INTO system_config (key, value, description) VALUES ('qwen_model', 'qwen-3', '模型名');
     END IF;
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'yz_login_url') THEN
-        INSERT INTO system_config (key, value, description) VALUES ('yz_login_url', 'http://192.168.0.19:5555', 'yz-login 地址');
+        INSERT INTO system_config (key, value, description) VALUES ('yz_login_url', 'http://192.168.0.18:5551', '登录服务地址');
     END IF;
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'scan_concurrency') THEN
-        INSERT INTO system_config (key, value, description) VALUES ('scan_concurrency', '1', '并发扫描数');
+        INSERT INTO system_config (key, value, description) VALUES ('scan_concurrency', '1', '并发数');
     END IF;
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'ai_enabled') THEN
-        INSERT INTO system_config (key, value, description) VALUES ('ai_enabled', 'true', '是否启用 AI 辅助匹配');
+        INSERT INTO system_config (key, value, description) VALUES ('ai_enabled', 'true', '启用 AI 辅助匹配');
     END IF;
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'gbt_standard') THEN
-        INSERT INTO system_config (key, value, description) VALUES ('gbt_standard', 'GBT 50378-2019(2024年版)', '绿色建筑标准名称');
+        INSERT INTO system_config (key, value, description) VALUES ('gbt_standard', 'GBT 50378-2019(2024年版)', '标准名称');
     END IF;
 END $$;
 """

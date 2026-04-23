@@ -2,91 +2,83 @@
 
 {% block title %}系统配置 - PDF 扫描器{% endblock %}
 
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css') }}">
+{% endblock %}
+
 {% block content %}
-<h3>系统配置</h3>
-
-<div id="config-list"></div>
-
-<div class="mt-3">
-    <button class="btn btn-primary" onclick="saveAll()">保存全部</button>
-    <button class="btn btn-outline-secondary" onclick="testSMB()">测试 SMB</button>
-    <button class="btn btn-outline-secondary" onclick="testOCR()">测试 OCR</button>
-    <button class="btn btn-outline-secondary" onclick="testAI()">测试 AI</button>
+<div class="config-page-header">
+    <h3 class="mb-0"><i class="bi bi-gear-fill me-2"></i>系统配置</h3>
+    <button class="btn btn-primary" onclick="saveAll()">
+        <i class="bi bi-save me-1"></i>保存全部
+    </button>
 </div>
 
-<div id="test-result" class="mt-3"></div>
+<div class="row g-4" id="config-container">
+    <!-- 左列 -->
+    <div class="col-md-6">
+        <div class="card config-card">
+            <div class="card-header">
+                <span><i class="bi bi-hdd-network me-2"></i>SMB 文件源</span>
+                <button class="btn btn-sm btn-outline-primary" onclick="testSMB()">
+                    <i class="bi bi-play-circle me-1"></i>测试连接
+                </button>
+            </div>
+            <div class="card-body" id="smb-configs"></div>
+            <div class="card-footer d-none" id="smb-result"></div>
+        </div>
+
+        <div class="card config-card">
+            <div class="card-header">
+                <span><i class="bi bi-cpu me-2"></i>AI 匹配引擎</span>
+                <button class="btn btn-sm btn-outline-primary" onclick="testAI()">
+                    <i class="bi bi-play-circle me-1"></i>测试连接
+                </button>
+            </div>
+            <div class="card-body" id="ai-configs"></div>
+            <div class="card-footer d-none" id="ai-result"></div>
+        </div>
+    </div>
+
+    <!-- 右列 -->
+    <div class="col-md-6">
+        <div class="card config-card">
+            <div class="card-header">
+                <span><i class="bi bi-file-earmark-text me-2"></i>PaddleOCR 识别</span>
+                <button class="btn btn-sm btn-outline-primary" onclick="testOCR()">
+                    <i class="bi bi-play-circle me-1"></i>测试连接
+                </button>
+            </div>
+            <div class="card-body" id="ocr-configs"></div>
+            <div class="card-footer d-none" id="ocr-result"></div>
+        </div>
+
+        <div class="card config-card">
+            <div class="card-header">
+                <i class="bi bi-sliders me-2"></i>扫描参数
+            </div>
+            <div class="card-body" id="scan-configs"></div>
+        </div>
+
+        <div class="card config-card">
+            <div class="card-header">
+                <i class="bi bi-shield-lock me-2"></i>认证设置
+            </div>
+            <div class="card-body" id="auth-configs"></div>
+        </div>
+    </div>
+</div>
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="saveToast" class="toast align-items-center text-bg-success" role="alert">
+        <div class="d-flex">
+            <div class="toast-body"><i class="bi bi-check-circle me-2"></i>配置已保存</div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
-<script>
-let configs = {};
-
-function loadConfigs() {
-    fetch('/api/config')
-        .then(r => r.json())
-        .then(data => {
-            configs = {};
-            const list = document.getElementById('config-list');
-            list.innerHTML = '';
-            data.configs.forEach(c => {
-                configs[c.key] = c.value;
-                const isSecret = c.key.includes('password') || c.key.includes('api_key');
-                const inputType = isSecret ? 'password' : 'text';
-                const div = document.createElement('div');
-                div.className = 'mb-3';
-                div.innerHTML = `
-                    <label class="form-label">${escapeHtml(c.key)}</label>
-                    <input type="${inputType}" class="form-control" id="cfg-${c.key}"
-                           value="${escapeHtml(c.value || '')}" placeholder="${escapeHtml(c.description || '')}">
-                    <div class="form-text">${escapeHtml(c.description || '')}</div>
-                `;
-                list.appendChild(div);
-            });
-        });
-}
-
-function saveAll() {
-    Object.keys(configs).forEach(key => {
-        const value = document.getElementById('cfg-' + key).value;
-        fetch('/api/config/' + key, {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({value}),
-        });
-    });
-    alert('配置已保存');
-}
-
-function testSMB() {
-    fetch('/api/config/test-smb', {method: 'POST'})
-        .then(r => r.json())
-        .then(data => showResult('SMB', data));
-}
-
-function testOCR() {
-    fetch('/api/config/test-ocr', {method: 'POST'})
-        .then(r => r.json())
-        .then(data => showResult('OCR', data));
-}
-
-function testAI() {
-    fetch('/api/config/test-ai', {method: 'POST'})
-        .then(r => r.json())
-        .then(data => showResult('AI', data));
-}
-
-function showResult(name, data) {
-    const div = document.getElementById('test-result');
-    const alertClass = data.success ? 'alert-success' : 'alert-danger';
-    div.innerHTML = `<div class="alert ${alertClass}">${escapeHtml(name)}: ${escapeHtml(JSON.stringify(data))}</div>`;
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-loadConfigs();
-</script>
+<script src="{{ url_for('static', filename='js/settings.js') }}"></script>
 {% endblock %}

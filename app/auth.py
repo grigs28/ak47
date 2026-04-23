@@ -25,8 +25,8 @@ def admin_required(f):
 @bp.route('/login')
 def login_page():
     yz_url = current_app.config['YZ_LOGIN_URL']
-    redirect_uri = request.url_root.rstrip('/') + '/callback'
-    return redirect(f"{yz_url}/auth/sso?app_id=ak47&redirect_uri={redirect_uri}")
+    callback = request.url_root.rstrip('/') + '/callback'
+    return redirect(f"{yz_url}/login?from={callback}")
 
 @bp.route('/callback')
 def callback():
@@ -36,21 +36,23 @@ def callback():
 
     yz_url = current_app.config['YZ_LOGIN_URL']
     try:
-        resp = requests.get(f"{yz_url}/auth/verify-ticket", params={'ticket': ticket}, timeout=10)
+        resp = requests.get(f"{yz_url}/api/ticket/verify", params={'ticket': ticket}, timeout=10)
         data = resp.json()
     except Exception as e:
         return f"验证失败: {e}", 500
 
-    if not data.get('user_id'):
-        return "认证失败", 401
+    if not data.get('ok'):
+        return data.get('msg', '认证失败'), 401
 
-    if not data.get('is_admin'):
-        return "仅管理员可访问", 403
+    # 管理员名单从环境变量读取，逗号分隔
+    admin_users = current_app.config.get('ADMIN_USERS', [])
+    username = data.get('username', '')
+    is_admin = username in admin_users
 
-    session['user_id'] = data['user_id']
-    session['username'] = data.get('username', '')
-    session['display_name'] = data.get('display_name', '')
-    session['is_admin'] = data.get('is_admin', 0)
+    session['user_id'] = data['id']
+    session['username'] = username
+    session['display_name'] = data.get('display_name', username)
+    session['is_admin'] = is_admin
 
     return redirect(url_for('views.dashboard'))
 

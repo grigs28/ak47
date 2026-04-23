@@ -1,12 +1,35 @@
 import os
 import subprocess
 import shutil
+from datetime import datetime
 from app.models import SystemConfig
 
 class SMBManager:
+    _LOCKED_MOUNT_PATH = None
+
+    @classmethod
+    def get_mount_path(cls):
+        # 如果已锁定，返回锁定路径
+        if cls._LOCKED_MOUNT_PATH:
+            return cls._LOCKED_MOUNT_PATH
+
+        # 从数据库读取，如果没有则生成默认路径
+        path = SystemConfig.get('smb_mount_path')
+        if not path:
+            path = cls._generate_default_path()
+            SystemConfig.set('smb_mount_path', path)
+        return path
+
     @staticmethod
-    def get_mount_path():
-        return SystemConfig.get('smb_mount_path', '/mnt/smb/ftpdata')
+    def _generate_default_path():
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        home = os.path.expanduser('~')
+        return os.path.join(home, 'mnt', 'ak47', ts)
+
+    @classmethod
+    def _lock_mount_path(cls, path):
+        """锁定挂载点，禁止修改"""
+        cls._LOCKED_MOUNT_PATH = path
 
     @staticmethod
     def get_config():
@@ -15,6 +38,7 @@ class SMBManager:
             'share': SystemConfig.get('smb_share', 'abb/FS/10/D$/tbmdata/data/ftpdata'),
             'username': SystemConfig.get('smb_username', ''),
             'password': SystemConfig.get('smb_password', ''),
+            'domain': SystemConfig.get('smb_domain', ''),
             'mount_path': SMBManager.get_mount_path(),
         }
 
@@ -34,23 +58,36 @@ class SMBManager:
         cfg = cls.get_config()
         mount_path = cfg['mount_path']
 
+        # 检查是否已挂载
+        if cls.is_mounted():
+            cls._lock_mount_path(mount_path)
+            return True
+
+        # 未挂载：生成新的时间戳路径
+        mount_path = cls._generate_default_path()
+        SystemConfig.set('smb_mount_path', mount_path)
+
         os.makedirs(mount_path, exist_ok=True)
 
-        if cls.is_mounted():
-            cls.umount()
-
-        share_url = f"//{cfg['server']}/{cfg['share'].replace('/', '\\')}"
+        # 处理 Windows UNC 格式：去掉开头的 \\\\ 和反斜杠
+        share = cfg['share'].lstrip('\\').replace('\\', '/')
+        share_url = f"//{cfg['server']}/{share}"
+        opts = f"vers=3.0,sec=ntlmssp,username={cfg['username']},password={cfg['password']},uid={os.getuid()},gid={os.getgid()},file_mode=0777,dir_mode=0777,ro"
+        if cfg['domain']:
+            opts += f",domain={cfg['domain']}"
         cmd = [
-            'mount', '-t', 'cifs',
+            'sudo', '-S', 'mount', '-t', 'cifs',
             share_url,
             mount_path,
-            '-o', f"username={cfg['username']},password={cfg['password']},ro,vers=3.0"
+            '-o', opts
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, input='Slnwg123$\n')
         if result.returncode != 0:
             raise RuntimeError(f"SMB mount failed: {result.stderr}")
 
+        # 挂载成功后锁定路径
+        cls._lock_mount_path(mount_path)
         return True
 
     @classmethod
@@ -59,7 +96,7 @@ class SMBManager:
         if not os.path.ismount(mount_path):
             return True
 
-        result = subprocess.run(['umount', mount_path], capture_output=True, text=True)
+        result = subprocess.run(['sudo', '-S', 'umount', mount_path], capture_output=True, text=True, input='Slnwg123$\n')
         return result.returncode == 0
 
     @classmethod
