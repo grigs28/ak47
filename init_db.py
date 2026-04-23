@@ -163,14 +163,33 @@ CREATE TABLE IF NOT EXISTS design_cache (
     updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS 建设单位 VARCHAR(500);
-ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS 工程名称 VARCHAR(1000);
-ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS 设计编号 VARCHAR(100);
-ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS 图名 VARCHAR(500);
-ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS 图号 VARCHAR(50);
-ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS 图别 VARCHAR(50);
-ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS json_result JSONB;
-ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS is_instruction BOOLEAN DEFAULT NULL;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'scanned_files' AND column_name = '建设单位') THEN
+        ALTER TABLE scanned_files ADD COLUMN 建设单位 VARCHAR(500);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'scanned_files' AND column_name = '工程名称') THEN
+        ALTER TABLE scanned_files ADD COLUMN 工程名称 VARCHAR(1000);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'scanned_files' AND column_name = '设计编号') THEN
+        ALTER TABLE scanned_files ADD COLUMN 设计编号 VARCHAR(100);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'scanned_files' AND column_name = '图名') THEN
+        ALTER TABLE scanned_files ADD COLUMN 图名 VARCHAR(500);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'scanned_files' AND column_name = '图号') THEN
+        ALTER TABLE scanned_files ADD COLUMN 图号 VARCHAR(50);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'scanned_files' AND column_name = '图别') THEN
+        ALTER TABLE scanned_files ADD COLUMN 图别 VARCHAR(50);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'scanned_files' AND column_name = 'json_result') THEN
+        ALTER TABLE scanned_files ADD COLUMN json_result JSONB;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'scanned_files' AND column_name = 'is_instruction') THEN
+        ALTER TABLE scanned_files ADD COLUMN is_instruction BOOLEAN DEFAULT NULL;
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_scanned_files_design_number ON scanned_files(设计编号);
 """
