@@ -241,7 +241,14 @@ function updateStatus() {
 
             document.getElementById('current-file').textContent = '当前文件：' + (data.current_file || '-');
             document.getElementById('current-dir').textContent = '当前目录：' + (data.current_dir || '-');
-            document.getElementById('scan-status-text').textContent = '状态：' + (data.status || 'idle');
+            // 状态徽章
+            const statusMap = {
+                'idle': '<span class="badge bg-secondary">空闲</span>',
+                'running': '<span class="badge bg-success">运行中</span>',
+                'paused': '<span class="badge bg-warning text-dark">已暂停</span>',
+                'completed': '<span class="badge bg-info">已完成</span>',
+            };
+            document.getElementById('scan-status-text').innerHTML = '状态：' + (statusMap[data.status] || '<span class="badge bg-secondary">' + (data.status || 'idle') + '</span>');
             document.getElementById('current-design').textContent = data.current_design_number || '-';
 
             // 显示开始时间和已扫描时长
