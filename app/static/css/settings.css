@@ -1,0 +1,29 @@
+/* 系统配置页面样式 */
+.config-page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+
+.config-page-header h3 {
+    margin-bottom: 0;
+}
+
+.config-card {
+    margin-bottom: 1.5rem;
+}
+
+.config-card .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.config-card .card-footer {
+    padding: 0.5rem 1rem;
+}
+
+.config-card .card-footer .alert {
+    margin-bottom: 0;
+}
