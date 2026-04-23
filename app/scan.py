@@ -1,14 +1,16 @@
 import os
 from app.smb import SMBManager
-from app.ocr import OCRClient
-from app.ai import AIMatcher
+from app.vision import InfoExtractor, InstructionClassifier, VisionOCRClient
+from app.vision.models import TempFile, DesignCache
 from app.models import ScanProgress, ScannedFile
+
 
 class Scanner:
     def __init__(self):
         self.smb = SMBManager()
-        self.ocr = OCRClient()
-        self.ai = AIMatcher()
+        self.extractor = InfoExtractor()
+        self.classifier = InstructionClassifier()
+        self.ocr = VisionOCRClient()
 
     def scan_all(self):
         progress = ScanProgress.get()
@@ -59,31 +61,8 @@ class Scanner:
                 file_path = self.smb.get_file_path(pdf['path'])
 
                 try:
-                    task_id, md_content = self.ocr.process_file(file_path)
-
-                    has_brackets = self.ai.has_brackets(md_content)
-
+                    self._process_single_pdf(pdf, dirname, file_path)
                     scanned += 1
-
-                    if has_brackets:
-                        matched += 1
-
-                        ai_result = self.ai.match(md_content)
-
-                        ScannedFile.create(
-                            file_path=pdf['path'],
-                            directory=dirname,
-                            filename=pdf['name'],
-                            file_size=pdf['size'],
-                            has_brackets=True,
-                            ai_matched=ai_result.get('matched'),
-                            ai_confidence=ai_result.get('confidence'),
-                            ai_reason=ai_result.get('reason'),
-                            ocr_status='done',
-                            ocr_task_id=task_id,
-                            md_content=md_content,
-                            scanned_at='CURRENT_TIMESTAMP',
-                        )
 
                     ScanProgress.update(
                         current_dir=dirname,
@@ -113,3 +92,99 @@ class Scanner:
         )
 
         return {'status': 'completed', 'scanned': scanned, 'matched': matched}
+
+    def _process_single_pdf(self, pdf, dirname, file_path):
+        """处理单个 PDF 文件"""
+        # 1. 提取 6 字段（qwen-3 + OCR 兜底）
+        info = self.extractor.extract_with_ocr_fallback(file_path, self.ocr)
+        design_number = info['设计编号']
+
+        # 2. 保存到临时库
+        temp_file = TempFile.create(
+            file_path=pdf['path'],
+            directory=dirname,
+            filename=pdf['name'],
+            file_size=pdf['size'],
+            建设单位=info.get('建设单位'),
+            工程名称=info.get('工程名称'),
+            设计编号=design_number,
+            图名=info.get('图名'),
+            图号=info.get('图号'),
+            图别=info.get('图别'),
+            status='pending',
+        )
+        temp_id = temp_file['id']
+
+        # 3. qwen-3 裁图判断是否为说明
+        from app.vision.utils import pdf_page_to_image, crop_image_region, get_crop_strategy
+        image_path = pdf_page_to_image(file_path, page=1, dpi=200)
+        strategies = get_crop_strategy(image_path)
+
+        is_instruction = False
+        for region in strategies:
+            crop_path = crop_image_region(image_path, region=region)
+            is_instruction, confidence = self.classifier.classify(crop_path)
+            if is_instruction:
+                break
+
+        # 更新临时库状态
+        if is_instruction:
+            TempFile.update(temp_id, is_instruction=True, status='instruction')
+        else:
+            TempFile.update(temp_id, is_instruction=False, status='not_instruction')
+            # 不是说明，标记完成跳过
+            TempFile.update(temp_id, status='completed')
+            return
+
+        # 4. 是说明，检查设计编号是否已被标记
+        cache = DesignCache.get(design_number)
+        if cache and cache['has_instruction']:
+            # 已标记，直接入正式库（不再 OCR 找【】）
+            self._save_to_formal(pdf, dirname, info, '', is_instruction=True)
+            TempFile.update(temp_id, status='completed')
+            return
+
+        # 5. 未标记，OCR 找【】
+        result = self.ocr.process_and_check(file_path)
+
+        if result['has_brackets']:
+            # 找到【】，标记设计编号，保存正式库
+            DesignCache.create_or_update(
+                design_number,
+                建设单位=info.get('建设单位'),
+                工程名称=info.get('工程名称'),
+                has_instruction=True,
+                instruction_count=1,
+            )
+            self._save_to_formal(
+                pdf, dirname, info,
+                result['md_content'],
+                is_instruction=True,
+                ocr_task_id=result['task_id'],
+            )
+        # 没找到【】，留在临时库
+
+        TempFile.update(temp_id, status='completed')
+
+    def _save_to_formal(self, pdf, dirname, info, md_content, is_instruction=False, ocr_task_id=None):
+        """保存到正式库"""
+        import json
+        ScannedFile.create(
+            file_path=pdf['path'],
+            directory=dirname,
+            filename=pdf['name'],
+            file_size=pdf['size'],
+            建设单位=info.get('建设单位'),
+            工程名称=info.get('工程名称'),
+            设计编号=info.get('设计编号'),
+            图名=info.get('图名'),
+            图号=info.get('图号'),
+            图别=info.get('图别'),
+            json_result=json.dumps(info),
+            is_instruction=is_instruction,
+            has_brackets=True,
+            ocr_status='done',
+            ocr_task_id=ocr_task_id,
+            md_content=md_content,
+            scanned_at='CURRENT_TIMESTAMP',
+        )
