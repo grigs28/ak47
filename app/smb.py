@@ -101,7 +101,7 @@ class SMBManager:
 
     @classmethod
     def list_dirs(cls):
-        """列出挂载根目录下所有子目录，返回 [(dirname, number), ...]"""
+        """列出挂载根目录下所有子目录，按修改时间降序排列"""
         mount_path = cls.get_mount_path()
         if not cls.is_mounted():
             raise RuntimeError("SMB not mounted")
@@ -110,9 +110,10 @@ class SMBManager:
         for name in os.listdir(mount_path):
             full = os.path.join(mount_path, name)
             if os.path.isdir(full):
-                num = cls._extract_number(name)
-                dirs.append((name, num))
+                mtime = os.path.getmtime(full)
+                dirs.append((name, mtime))
 
+        # 按修改时间降序排列（最新的在前面）
         dirs.sort(key=lambda x: x[1], reverse=True)
         return dirs
 
