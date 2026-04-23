@@ -66,8 +66,8 @@ class Scanner:
                 started_at='NOW()',
             )
 
-            # 递归获取所有PDF（限制深度5层）
-            pdfs = self.smb.list_pdfs(dirname, recursive=True, max_depth=5)
+            # 递归获取所有PDF（限制深度10层）
+            pdfs = self.smb.list_pdfs(dirname, recursive=True, max_depth=10)
 
             if not pdfs:
                 print(f"[INFO] 项目 {dirname} 没有PDF文件")

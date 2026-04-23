@@ -122,7 +122,7 @@ class SMBManager:
         return dirs[start:end], total
 
     @classmethod
-    def list_pdfs(cls, directory, recursive=True, max_depth=5):
+    def list_pdfs(cls, directory, recursive=True, max_depth=10):
         """列出指定目录下所有 PDF 文件，默认递归子目录，最大深度5层"""
         mount_path = cls.get_mount_path()
         dir_path = os.path.join(mount_path, directory)
