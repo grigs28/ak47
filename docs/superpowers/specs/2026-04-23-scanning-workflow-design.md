@@ -38,13 +38,14 @@ app/vision/
     ▼
 ┌─────────────────┐
 │ 1. PDF转图片    │──▶ pdftoppm 第1页
-│ 2. 裁剪区域     │──▶ 竖版底部20% / 横版右侧20%
+│ 2. 裁剪区域     │──▶ 竖版底部20% → 失败则顶部20%
+│                 │    横版右侧20% → 失败则左侧20%
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
 │ 3. qwen-3提取   │──▶ 6字段JSON
-│    6字段        │
+│    6字段        │    失败 → OCR兜底
 └────────┬────────┘
          │
          ▼
@@ -55,28 +56,39 @@ app/vision/
          │
          ▼
 ┌─────────────────┐
-│ 5. qwen-3判断   │──▶ 是否为"说明"文档
-│    是否说明     │
+│ 5. qwen-3裁图   │──▶ 判断是否为"说明"
+│    判断说明     │
 └────────┬────────┘
     ┌────┴────┐
     ▼         ▼
   是说明    不是说明
     │         │
     ▼         ▼
-┌────────┐  ┌────────┐
-│6. OCR  │  │ 标记完成│
-│  找【】 │  │ 跳过    │
-└───┬────┘  └────────┘
-    │
-┌───┴───┐
-▼       ▼
-有【】  无【】
-│       │
-▼       ▼
-┌────────────┐  ┌────────┐
-│7. 保存正式库│  │ 标记完成│
-│  pdf+md+json│  │        │
-└────────────┘  └────────┘
+┌─────────────────┐  ┌────────┐
+│ 6. 检查缓存     │  │ 标记完成│
+│ 设计编号已标记？ │  │ 跳过    │
+└────────┬────────┘  └────────┘
+    ┌────┴────┐
+    ▼         ▼
+  已标记    未标记
+    │         │
+    ▼         ▼
+┌────────┐  ┌────────────┐
+│7. 直接 │  │8. OCR找【】 │
+│ 入正式库│  │            │
+│pdf+json│  └─────┬──────┘
+│  +md   │        │
+└────────┘   ┌───┴───┐
+             ▼       ▼
+           有【】   无【】
+             │       │
+             ▼       ▼
+    ┌────────────┐  ┌────────┐
+    │9. 标记设计 │  │ 留在   │
+    │  编号缓存  │  │ 临时库 │
+    │  保存正式库│  │ 标记完成│
+    │pdf+json+md│  │        │
+    └────────────┘  └────────┘
 ```
 
 ---
@@ -151,39 +163,57 @@ CREATE TABLE IF NOT EXISTS design_cache (
 
 ```python
 def process_pdf(file_path):
-    # 1. 提取6字段
-    info = extract_info_from_pdf(file_path)
+    # 1. PDF转图片 + 裁剪
+    # 竖版：底部20% → 失败则顶部20%
+    # 横版：右侧20% → 失败则左侧20%
+    image = pdf_to_image(file_path)
+    crop = crop_region(image)
+    
+    # 2. qwen-3提取6字段（失败则OCR兜底）
+    info = extract_info_with_fallback(crop, file_path)
     design_number = info['设计编号']
     
-    # 2. 保存临时库
+    # 3. 保存临时库
     temp_id = save_to_temp(file_path, info)
     
-    # 3. 检查缓存
-    cache = get_design_cache(design_number)
-    if cache and cache['has_instruction']:
-        # 已有说明文档，直接OCR
-        result = ocr_and_find_brackets(file_path)
-        if result['has_brackets']:
-            save_to_formal(file_path, info, result)
+    # 4. qwen-3裁图判断是否为说明文档
+    is_instruction = classify_instruction(crop)
+    update_temp_status(temp_id, is_instruction)
+    
+    if not is_instruction:
+        # 不是说明，标记完成跳过
         mark_completed(temp_id)
         return
     
-    # 4. qwen-3判断是否为说明文档
-    is_instruction = classify_instruction(file_path)
-    update_temp_status(temp_id, is_instruction)
+    # 5. 是说明，检查设计编号是否已被标记
+    cache = get_design_cache(design_number)
+    if cache and cache['has_instruction']:
+        # 已标记，直接入正式库（不再OCR找【】）
+        save_to_formal(file_path, info, md_content='', json_result=info)
+        mark_completed(temp_id)
+        return
     
-    if is_instruction:
-        # 5. OCR找【】
-        result = ocr_and_find_brackets(file_path)
-        if result['has_brackets']:
-            save_to_formal(file_path, info, result)
-        # 更新缓存
+    # 6. 未标记，OCR找【】
+    result = ocr_and_find_brackets(file_path)
+    if result['has_brackets']:
+        # 找到【】，标记设计编号，保存正式库
         update_design_cache(design_number, has_instruction=True)
+        save_to_formal(file_path, info, result)
+    # 没找到【】，留在临时库，标记完成
     
     mark_completed(temp_id)
 ```
 
-### 4.2 提取6字段 Prompt
+### 4.2 图片裁剪策略
+
+| 图纸方向 | 首选裁剪区域 | 失败后备方案 |
+|----------|-------------|-------------|
+| 竖版 (height > width) | 底部20% | 顶部20% |
+| 横版 (width >= height) | 右侧20% | 左侧20% |
+
+裁剪后图片经 base64 编码传给 qwen-3。若 qwen-3 提取失败（超时/返回格式错误/设计编号不含"-"），则对该裁剪区域做 OCR 兜底识别。
+
+### 4.3 提取6字段 Prompt
 
 ```
 请从这张建筑图纸图片中提取以下字段：
@@ -199,7 +229,14 @@ def process_pdf(file_path):
 找不到的字段填null。只返回JSON，不要其他内容。
 ```
 
-### 4.3 判断说明文档 Prompt
+### 4.4 扫描目录策略
+
+取消按目录编号大小排序，改为从 **最新修改时间** 的目录开始扫描。每次扫描时：
+1. 列出所有目录
+2. 按 `mtime` 降序排列
+3. 从最新目录开始处理
+
+### 4.5 判断说明文档 Prompt
 
 ```
 请判断以下文档是否为"建筑设计说明"或"设计说明"类文档。
@@ -211,6 +248,13 @@ def process_pdf(file_path):
 {"is_instruction": true/false, "confidence": 0.0-1.0, "reason": "判断理由"}
 只返回JSON。
 ```
+
+### 4.6 临时文件管理
+
+- 临时图片文件保存在 `/tmp/ak47_vision/` 目录下，按进程PID组织子目录
+- 每个PDF处理完成后立即清理对应临时图片
+- 进程退出时清理整个PID目录
+- 定时任务（每天凌晨）清理残留超过24小时的临时目录
 
 ---
 
@@ -258,9 +302,11 @@ GET    /api/files/<id>              返回增加6字段和json_result
 | 场景 | 处理策略 |
 |------|----------|
 | 设计编号提取失败（无"-"） | 标记为失败，跳过，记录日志 |
-| qwen-3 提取超时 | 重试2次，仍失败则标记为待人工处理 |
+| qwen-3 提取超时 | 重试2次，仍失败则对该裁剪区域OCR兜底识别 |
+| qwen-3 返回设计编号无"-" | 标记为失败，尝试另一裁剪区域 |
 | OCR 超时 | 重试3次，标记 ocr_status=failed |
 | 缓存不一致 | 定时任务清理过期缓存（7天） |
+| 临时文件残留 | 进程退出清理PID目录 + 定时任务清理24h以上残留 |
 
 ---
 
@@ -277,8 +323,10 @@ GET    /api/files/<id>              返回增加6字段和json_result
 
 ### 8.3 歧义消除
 - "说明文档"：包含"设计说明"、"建筑设计说明"等字样的文档
-- "正式库"：含【】且通过OCR确认的文档
+- "正式库"：含【】且通过OCR确认的文档；设计编号被标记后，说明文档无条件入正式库
 - "标记完成"：无论是否入正式库，都标记为已处理
+- "最新目录"：按文件系统 mtime 排序，而非目录名称中的数字
+- "设计编号被标记"：该编号下曾经找到过【】，后续同编号说明文档直接入正式库
 
 ---
 
