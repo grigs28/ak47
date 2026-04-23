@@ -1,7 +1,9 @@
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.smb import SMBManager
 from app.vision import InfoExtractor, InstructionClassifier, VisionOCRClient
-from app.vision.models import TempFile, DesignCache, ScannedDirectory
+from app.vision.models import TempFile, DesignCache, ScannedDirectory, design_cache_memory
 from app.models import ScanProgress, ScannedFile
 
 
@@ -11,8 +13,14 @@ class Scanner:
         self.extractor = InfoExtractor()
         self.classifier = InstructionClassifier()
         self.ocr = VisionOCRClient()
+        # 线程锁，用于保护共享状态
+        self._progress_lock = threading.Lock()
+        self._design_lock = threading.Lock()
 
     def scan_all(self):
+        # 加载设计编号缓存到内存
+        design_cache_memory.load_from_db()
+
         progress = ScanProgress.get()
 
         if progress['status'] == 'completed':
@@ -70,47 +78,27 @@ class Scanner:
                 )
                 continue
 
-            print(f"[INFO] 项目 {dirname} 找到 {len(pdfs)} 个PDF")
+            print(f"[INFO] 项目 {dirname} 找到 {len(pdfs)} 个PDF，启动3线程扫描")
 
-            # 按设计编号分组
-            pdf_groups = self._group_by_design_number(pdfs, dirname)
+            # 更新总文件数（实际值）
+            ScanProgress.update(total_files=len(pdfs))
 
-            for group_idx, (design_number, group_pdfs) in enumerate(pdf_groups.items()):
-                # 检查是否应跳过（跨项目缓存）
-                if DesignCache.should_skip(design_number):
-                    print(f"[SKIP] 设计编号 {design_number} 已在其他项目标记，跳过 {len(group_pdfs)} 个文件")
-                    scanned += len(group_pdfs)
-                    continue
+            # === 多线程扫描 ===
+            result = self._scan_directory_multi_thread(dirname, pdfs)
 
-                # 处理该设计编号下的所有文件
-                for pdf in group_pdfs:
-                    current = ScanProgress.get()
-                    if current['status'] == 'paused':
-                        ScanProgress.update(
-                            current_dir=dirname,
-                            current_file=pdf['path'],
-                            dir_index=dir_idx,
-                            file_index=group_idx,
-                            scanned_files=scanned,
-                            matched_files=matched,
-                        )
-                        return {'status': 'paused'}
-
-                    try:
-                        self._process_single_pdf(pdf, dirname)
-                        scanned += 1
-                    except Exception as e:
-                        print(f"Error processing {pdf['path']}: {e}")
-                        scanned += 1
-
+            if result['status'] == 'paused':
+                # 暂停时保存进度
+                with self._progress_lock:
                     ScanProgress.update(
                         current_dir=dirname,
-                        current_file=pdf['path'],
                         dir_index=dir_idx,
-                        file_index=group_idx,
-                        scanned_files=scanned,
-                        matched_files=matched,
+                        scanned_files=result.get('scanned', scanned),
+                        matched_files=result.get('matched', matched),
                     )
+                return {'status': 'paused'}
+
+            scanned += result.get('scanned', 0)
+            matched += result.get('matched', 0)
 
             # 项目扫描完成，更新统计
             ScannedDirectory.create_or_update(
@@ -128,25 +116,112 @@ class Scanner:
 
         return {'status': 'completed', 'scanned': scanned, 'matched': matched}
 
-    def _group_by_design_number(self, pdfs, dirname):
-        """按设计编号分组PDF，先提取信息再分组"""
-        groups = {}
-        for pdf in pdfs:
-            file_path = self.smb.get_file_path(pdf['path'])
+    def _scan_directory_multi_thread(self, dirname, pdfs):
+        """3线程扫描单个目录"""
+        # 将文件分成3组
+        file_groups = self._split_files_for_threads(pdfs)
+
+        scanned = 0
+        matched = 0
+        paused = False
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            # 提交3个线程任务
+            futures = {
+                executor.submit(self._thread_worker, dirname, files, thread_id): thread_id
+                for thread_id, files in file_groups.items()
+            }
+
+            for future in as_completed(futures):
+                thread_id = futures[future]
+                try:
+                    result = future.result()
+                    if result.get('status') == 'paused':
+                        paused = True
+                    else:
+                        scanned += result.get('scanned', 0)
+                        matched += result.get('matched', 0)
+                except Exception as e:
+                    print(f"[ERROR] 线程 {thread_id} 异常: {e}")
+
+        if paused:
+            return {'status': 'paused', 'scanned': scanned, 'matched': matched}
+
+        return {'status': 'completed', 'scanned': scanned, 'matched': matched}
+
+    def _split_files_for_threads(self, pdfs):
+        """将PDF文件按范围分配给3个线程
+        A: 0-3, B: 4-6, C: 7-9，以此类推
+        """
+        groups = {'A': [], 'B': [], 'C': []}
+        for idx, pdf in enumerate(pdfs):
+            remainder = idx % 10
+            if remainder <= 3:
+                groups['A'].append(pdf)
+            elif remainder <= 6:
+                groups['B'].append(pdf)
+            else:
+                groups['C'].append(pdf)
+        return groups
+
+    def _thread_worker(self, dirname, files, thread_id):
+        """线程工作函数"""
+        scanned = 0
+        matched = 0
+
+        for pdf in files:
+            # 检查暂停状态
+            current = ScanProgress.get()
+            if current['status'] == 'paused':
+                with self._progress_lock:
+                    ScanProgress.update(
+                        current_dir=dirname,
+                        current_file=pdf['path'],
+                        scanned_files=scanned,
+                        matched_files=matched,
+                    )
+                return {'status': 'paused', 'scanned': scanned, 'matched': matched}
+
             try:
-                info = self.extractor.extract_with_ocr_fallback(file_path, self.ocr)
-                design_number = info['设计编号']
+                result = self._process_single_pdf_thread_safe(pdf, dirname, thread_id)
+                scanned += 1
+                if result:
+                    matched += 1
             except Exception as e:
-                print(f"提取设计编号失败 {pdf['path']}: {e}")
-                design_number = 'unknown'
+                print(f"[ERROR] 线程 {thread_id} 处理 {pdf['path']}: {e}")
+                scanned += 1
 
-            if design_number not in groups:
-                groups[design_number] = []
-            groups[design_number].append(pdf)
+            # 更新进度
+            with self._progress_lock:
+                ScanProgress.update(
+                    current_dir=dirname,
+                    current_file=pdf['path'],
+                    scanned_files=scanned,
+                    matched_files=matched,
+                )
 
-            # 先保存到临时库
-            try:
-                TempFile.create(
+        return {'status': 'completed', 'scanned': scanned, 'matched': matched}
+
+    def _process_single_pdf_thread_safe(self, pdf, dirname, thread_id):
+        """线程安全的单PDF处理
+        返回 True 表示匹配（是说明），False 表示不匹配
+        """
+        file_path = self.smb.get_file_path(pdf['path'])
+
+        # 步骤1: 提取设计编号（每个线程独立）
+        try:
+            info = self.extractor.extract_with_ocr_fallback(file_path, self.ocr)
+            design_number = info['设计编号']
+        except Exception as e:
+            print(f"[线程 {thread_id}] 提取设计编号失败 {pdf['path']}: {e}")
+            design_number = 'unknown'
+            info = {}
+
+        # 保存到临时库
+        try:
+            temp_file = TempFile.get_by_path(pdf['path'])
+            if not temp_file:
+                temp_file = TempFile.create(
                     file_path=pdf['path'],
                     directory=dirname,
                     filename=pdf['name'],
@@ -159,47 +234,12 @@ class Scanner:
                     图别=info.get('图别'),
                     status='pending',
                 )
-            except Exception as e:
-                print(f"保存临时文件失败 {pdf['path']}: {e}")
+        except Exception as e:
+            print(f"[线程 {thread_id}] 保存临时文件失败 {pdf['path']}: {e}")
 
-        return groups
+        temp_id = temp_file['id'] if temp_file else None
 
-    def _process_single_pdf(self, pdf, dirname):
-        """处理单个 PDF 文件"""
-        file_path = self.smb.get_file_path(pdf['path'])
-
-        # 获取临时文件记录
-        temp_file = TempFile.get_by_path(pdf['path'])
-        if not temp_file:
-            # 如果临时库没有，先提取信息
-            info = self.extractor.extract_with_ocr_fallback(file_path, self.ocr)
-            temp_file = TempFile.create(
-                file_path=pdf['path'],
-                directory=dirname,
-                filename=pdf['name'],
-                file_size=pdf['size'],
-                建设单位=info.get('建设单位'),
-                工程名称=info.get('工程名称'),
-                设计编号=info['设计编号'],
-                图名=info.get('图名'),
-                图号=info.get('图号'),
-                图别=info.get('图别'),
-                status='pending',
-            )
-        else:
-            info = {
-                '建设单位': temp_file.get('建设单位'),
-                '工程名称': temp_file.get('工程名称'),
-                '设计编号': temp_file.get('设计编号'),
-                '图名': temp_file.get('图名'),
-                '图号': temp_file.get('图号'),
-                '图别': temp_file.get('图别'),
-            }
-
-        temp_id = temp_file['id']
-        design_number = info['设计编号']
-
-        # qwen-3 裁图判断是否为说明
+        # 步骤2: qwen-3 裁图判断是否为说明（每个线程独立）
         from app.vision.utils import pdf_page_to_image, crop_image_region, get_crop_strategy
         image_path = pdf_page_to_image(file_path, page=1, dpi=200)
         strategies = get_crop_strategy(image_path)
@@ -212,43 +252,55 @@ class Scanner:
                 break
 
         # 更新临时库状态
-        if is_instruction:
-            TempFile.update(temp_id, is_instruction=True, status='instruction')
-        else:
-            TempFile.update(temp_id, is_instruction=False, status='not_instruction')
-            TempFile.update(temp_id, status='completed')
-            return
+        if temp_id:
+            if is_instruction:
+                TempFile.update(temp_id, is_instruction=True, status='instruction')
+            else:
+                TempFile.update(temp_id, is_instruction=False, status='not_instruction')
+                TempFile.update(temp_id, status='completed')
+                return False
 
-        # 是说明，检查设计编号是否已被标记
-        cache = DesignCache.get(design_number)
-        if cache and cache['has_instruction']:
-            # 已标记，直接入正式库（不再 OCR 找【】）
-            self._save_to_formal(pdf, dirname, info, '', is_instruction=True)
-            TempFile.update(temp_id, status='completed')
-            return
+        # 是说明，检查设计编号是否已被标记（内存缓存，线程安全）
+        cache_hit = design_cache_memory.should_skip(design_number)
 
-        # 未标记，OCR 找【】
+        if cache_hit:
+            # 已标记，直接入正式库（不再 OCR 找【】，但要做 OCR 生成 MD）
+            print(f"[线程 {thread_id}] 设计编号 {design_number} 已标记，直接OCR生成MD")
+            try:
+                task_id, md_content = self.ocr.process_file(file_path)
+                self._save_to_formal(pdf, dirname, info, md_content, is_instruction=True, ocr_task_id=task_id)
+                if temp_id:
+                    TempFile.update(temp_id, status='completed')
+                return True
+            except Exception as e:
+                print(f"[线程 {thread_id}] OCR生成MD失败 {pdf['path']}: {e}")
+                if temp_id:
+                    TempFile.update(temp_id, status='completed')
+                return True
+
+        # 未标记，需要 OCR 找【】（第一个文件）
+        print(f"[线程 {thread_id}] 设计编号 {design_number} 首次出现，OCR找【】")
         result = self.ocr.process_and_check(file_path)
 
         if result['has_brackets']:
-            # 找到【】，标记设计编号，保存正式库
-            DesignCache.create_or_update(
-                design_number,
-                建设单位=info.get('建设单位'),
-                工程名称=info.get('工程名称'),
-                has_instruction=True,
-                instruction_count=1,
-                first_seen_directory=dirname,
-            )
+            # 找到【】，标记设计编号（线程安全）
+            design_cache_memory.mark(design_number)
+            print(f"[线程 {thread_id}] 找到【】，标记设计编号 {design_number}")
+
             self._save_to_formal(
                 pdf, dirname, info,
                 result['md_content'],
                 is_instruction=True,
                 ocr_task_id=result['task_id'],
             )
-        # 没找到【】，留在临时库
+            if temp_id:
+                TempFile.update(temp_id, status='completed')
+            return True
 
-        TempFile.update(temp_id, status='completed')
+        # 没找到【】，留在临时库
+        if temp_id:
+            TempFile.update(temp_id, status='completed')
+        return False
 
     def _save_to_formal(self, pdf, dirname, info, md_content, is_instruction=False, ocr_task_id=None):
         """保存到正式库"""

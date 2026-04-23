@@ -1,4 +1,58 @@
+import threading
 from app.db import query, execute
+
+
+# === 全局共享设计编号缓存（内存 + 数据库持久化） ===
+class DesignCacheMemory:
+    """线程安全的设计编号内存缓存，扫描前从数据库加载"""
+
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._cache = set()
+                    cls._instance._init_lock = threading.Lock()
+                    cls._instance._initialized = False
+        return cls._instance
+
+    def load_from_db(self):
+        """从数据库加载所有已标记的设计编号到内存"""
+        with self._init_lock:
+            if self._initialized:
+                return
+            rows = query("SELECT 设计编号 FROM design_cache WHERE has_instruction = TRUE", fetchall=True)
+            self._cache = set(row['设计编号'] for row in (rows or []) if row.get('设计编号'))
+            self._initialized = True
+            print(f"[DesignCacheMemory] 加载 {len(self._cache)} 个设计编号到内存缓存")
+
+    def should_skip(self, design_number):
+        """内存中判断是否应跳过"""
+        if not design_number or design_number == 'unknown':
+            return False
+        return design_number in self._cache
+
+    def mark(self, design_number):
+        """标记设计编号（内存 + 数据库）"""
+        if not design_number or design_number == 'unknown':
+            return
+        with self._init_lock:
+            self._cache.add(design_number)
+        # 同步写入数据库
+        DesignCache.create_or_update(design_number, has_instruction=True)
+
+    def reset(self):
+        """重置缓存（用于测试）"""
+        with self._init_lock:
+            self._cache.clear()
+            self._initialized = False
+
+
+# 全局单例
+design_cache_memory = DesignCacheMemory()
 
 
 class TempFile:
@@ -82,9 +136,15 @@ class DesignCache:
 
     @classmethod
     def should_skip(cls, design_number):
-        """判断该设计编号是否应跳过（已在其他项目标记）"""
+        """判断该设计编号是否应跳过（先查内存缓存，再查数据库）"""
+        # 优先查内存缓存（线程安全，快速）
+        if design_cache_memory.should_skip(design_number):
+            return True
+        # 内存未命中，查数据库
         row = cls.get(design_number)
         if row and row.get('has_instruction'):
+            # 同步到内存缓存
+            design_cache_memory.mark(design_number)
             return True
         return False
 
