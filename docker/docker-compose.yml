@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "5556:5556"
+    environment:
+      - FLASK_ENV=production
+      - REDIS_URL=redis://redis:6379/0
+      - DB_HOST=192.168.0.98
+      - DB_PORT=5432
+      - DB_NAME=yz_relay
+      - DB_USER=grigs
+      - DB_PASSWORD=${DB_PASSWORD}
+      - SMB_SERVER=192.168.0.79
+      - SMB_SHARE=abb/FS/10/D$/tbmdata/data/ftpdata
+      - SMB_USER=${SMB_USER}
+      - SMB_PASS=${SMB_PASS}
+    cap_add:
+      - SYS_ADMIN
+      - DAC_READ_SEARCH
+    security_opt:
+      - apparmor:unconfined
+    devices:
+      - /dev/fuse:/dev/fuse
+    depends_on:
+      - redis
+    command: web
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    environment:
+      - FLASK_ENV=production
+      - REDIS_URL=redis://redis:6379/0
+      - DB_HOST=192.168.0.98
+      - DB_PORT=5432
+      - DB_NAME=yz_relay
+      - DB_USER=grigs
+      - DB_PASSWORD=${DB_PASSWORD}
+      - SMB_SERVER=192.168.0.79
+      - SMB_SHARE=abb/FS/10/D$/tbmdata/data/ftpdata
+      - SMB_USER=${SMB_USER}
+      - SMB_PASS=${SMB_PASS}
+    cap_add:
+      - SYS_ADMIN
+      - DAC_READ_SEARCH
+    security_opt:
+      - apparmor:unconfined
+    devices:
+      - /dev/fuse:/dev/fuse
+    depends_on:
+      - redis
+    command: worker
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
