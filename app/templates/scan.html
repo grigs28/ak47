@@ -64,6 +64,10 @@
                             <label class="form-label small fw-semibold">标准名称</label>
                             <input type="text" class="form-control form-control-sm" id="gbt-standard" placeholder="GBT 50378-2019(2024年版)">
                         </div>
+                        <div class="mb-0 mt-3">
+                            <label class="form-label small fw-semibold">排除目录（逗号分隔）</label>
+                            <input type="text" class="form-control form-control-sm" id="scan-exclude-dirs" placeholder="如：28,归档文件">
+                        </div>
                     </div>
                     <div class="card-footer bg-transparent">
                         <span id="smb-save-result" class="small"></span>
@@ -400,12 +404,13 @@ function loadSMBForm() {
             document.getElementById('smb-domain').value = configs['smb_domain'] || '';
             document.getElementById('scan-concurrency').value = configs['scan_concurrency'] || '1';
             document.getElementById('gbt-standard').value = configs['gbt_standard'] || '';
+            document.getElementById('scan-exclude-dirs').value = configs['scan_exclude_dirs'] || '';
         });
 }
 
 function saveSMBConfig() {
-    const keys = ['smb_server', 'smb_share', 'smb_username', 'smb_password', 'smb_domain', 'scan_concurrency', 'gbt_standard'];
-    const ids = ['smb-server', 'smb-share', 'smb-username', 'smb-password', 'smb-domain', 'scan-concurrency', 'gbt-standard'];
+    const keys = ['smb_server', 'smb_share', 'smb_username', 'smb_password', 'smb_domain', 'scan_concurrency', 'gbt_standard', 'scan_exclude_dirs'];
+    const ids = ['smb-server', 'smb-share', 'smb-username', 'smb-password', 'smb-domain', 'scan-concurrency', 'gbt-standard', 'scan-exclude-dirs'];
     const promises = keys.map((key, i) => {
         const value = document.getElementById(ids[i]).value;
         return fetch('/api/config/' + key, {
