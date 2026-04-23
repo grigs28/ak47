@@ -144,7 +144,8 @@
                         </div>
                         <p class="text-muted mb-1" id="current-file">当前文件：-</p>
                         <p class="text-muted mb-1" id="current-dir">当前目录：-</p>
-                        <p class="text-muted" id="scan-status-text">状态：-</p>
+                        <p class="text-muted mb-1" id="scan-status-text">状态：-</p>
+                        <p class="text-muted mb-0" id="scan-time">开始时间：- | 已扫描：-</p>
                     </div>
                 </div>
             </div>
@@ -242,6 +243,24 @@ function updateStatus() {
             document.getElementById('current-dir').textContent = '当前目录：' + (data.current_dir || '-');
             document.getElementById('scan-status-text').textContent = '状态：' + (data.status || 'idle');
             document.getElementById('current-design').textContent = data.current_design_number || '-';
+
+            // 显示开始时间和已扫描时长
+            const scanTimeEl = document.getElementById('scan-time');
+            if (data.started_at) {
+                const startTime = new Date(data.started_at);
+                const startStr = startTime.toLocaleString();
+                const elapsed = Math.floor((Date.now() - startTime.getTime()) / 1000);
+                const hours = Math.floor(elapsed / 3600);
+                const mins = Math.floor((elapsed % 3600) / 60);
+                const secs = elapsed % 60;
+                let elapsedStr = '';
+                if (hours > 0) elapsedStr += hours + '时';
+                if (mins > 0 || hours > 0) elapsedStr += mins + '分';
+                elapsedStr += secs + '秒';
+                scanTimeEl.textContent = '开始时间：' + startStr + ' | 已扫描：' + elapsedStr;
+            } else {
+                scanTimeEl.textContent = '开始时间：- | 已扫描：-';
+            }
 
             const status = data.status;
             document.getElementById('btn-start').disabled = status === 'running';
