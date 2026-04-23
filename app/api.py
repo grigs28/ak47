@@ -271,6 +271,23 @@ def test_ai():
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
+@bp.route('/config/test-db', methods=['POST'])
+@admin_required
+def test_db():
+    try:
+        import psycopg2
+        from app.models import SystemConfig
+        host = SystemConfig.get('db_host', '192.168.0.98')
+        port = int(SystemConfig.get('db_port', '5432'))
+        dbname = SystemConfig.get('db_name', 'yz_relay')
+        user = SystemConfig.get('db_user', 'grigs')
+        password = SystemConfig.get('db_password', '')
+        conn = psycopg2.connect(host=host, port=port, dbname=dbname, user=user, password=password)
+        conn.close()
+        return jsonify({'success': True, 'message': f'数据库连接成功 ({host}:{port}/{dbname})'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 @bp.route('/logs', methods=['GET'])
 @admin_required
 def log_list():

@@ -101,6 +101,10 @@ function testAI() {
     testConnection('ai', 'AI', '/api/config/test-ai');
 }
 
+function testDB() {
+    testConnection('db', '数据库', '/api/config/test-db');
+}
+
 function testConnection(group, name, url) {
     const resultDiv = document.getElementById(group + '-result');
     resultDiv.classList.remove('d-none');

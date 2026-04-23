@@ -69,9 +69,13 @@
 
         <div class="card config-card">
             <div class="card-header">
-                <i class="bi bi-database me-2"></i>数据库配置
+                <span><i class="bi bi-database me-2"></i>数据库配置</span>
+                <button class="btn btn-sm btn-outline-primary" onclick="testDB()">
+                    <i class="bi bi-play-circle me-1"></i>测试连接
+                </button>
             </div>
             <div class="card-body" id="db-configs"></div>
+            <div class="card-footer d-none" id="db-result"></div>
         </div>
     </div>
 </div>
