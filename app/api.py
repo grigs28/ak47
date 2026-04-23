@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, session
 from app.auth import admin_required
 from app.models import ScanProgress, ScannedFile, SystemConfig, OperationLog
+from app.vision.models import TempFile, DesignCache
 from app.tasks import scan_task
 from app.smb import SMBManager
 from app.ocr import OCRClient
@@ -103,11 +104,13 @@ def file_list():
     ai_matched = request.args.get('ai_matched', None)
     if ai_matched is not None:
         ai_matched = ai_matched.lower() == 'true'
+    design_number = request.args.get('design_number', None)
 
     rows, total = ScannedFile.list(
         directory=directory,
         selected=selected,
         ai_matched=ai_matched,
+        design_number=design_number,
         page=page,
         size=size,
     )
@@ -295,3 +298,90 @@ def log_list():
     size = request.args.get('size', 50, type=int)
     rows = OperationLog.list(page=page, size=size)
     return jsonify({'logs': rows})
+
+# === 临时库 ===
+
+@bp.route('/temp-files', methods=['GET'])
+@admin_required
+def temp_file_list():
+    page = request.args.get('page', 1, type=int)
+    size = request.args.get('size', 20, type=int)
+    design_number = request.args.get('design_number', None)
+    status = request.args.get('status', None)
+
+    rows, total = TempFile.list(
+        design_number=design_number,
+        status=status,
+        page=page,
+        size=size,
+    )
+
+    return jsonify({
+        'files': rows,
+        'total': total,
+        'page': page,
+        'size': size,
+    })
+
+@bp.route('/temp-files/<int:file_id>', methods=['GET'])
+@admin_required
+def temp_file_detail(file_id):
+    row = TempFile.get(file_id)
+    if not row:
+        return jsonify({'error': '文件不存在'}), 404
+    return jsonify(row)
+
+@bp.route('/temp-files/<int:file_id>/classify', methods=['POST'])
+@admin_required
+def temp_file_classify(file_id):
+    """手动触发分类（重新判断是否为说明）"""
+    row = TempFile.get(file_id)
+    if not row:
+        return jsonify({'error': '文件不存在'}), 404
+
+    # 重新分类逻辑（调用 classifier）
+    from app.vision import InstructionClassifier
+    from app.vision.utils import pdf_page_to_image, crop_image_region, get_crop_strategy
+    from app.smb import SMBManager
+
+    file_path = SMBManager.get_file_path(row['file_path'])
+    image_path = pdf_page_to_image(file_path, page=1, dpi=200)
+    strategies = get_crop_strategy(image_path)
+
+    classifier = InstructionClassifier()
+    is_instruction = False
+    for region in strategies:
+        crop_path = crop_image_region(image_path, region=region)
+        is_instruction, confidence = classifier.classify(crop_path)
+        if is_instruction:
+            break
+
+    status = 'instruction' if is_instruction else 'not_instruction'
+    TempFile.update(file_id, is_instruction=is_instruction, status=status)
+
+    return jsonify({'is_instruction': is_instruction, 'status': status})
+
+# === 设计编号缓存 ===
+
+@bp.route('/design-cache', methods=['GET'])
+@admin_required
+def design_cache_list():
+    page = request.args.get('page', 1, type=int)
+    size = request.args.get('size', 20, type=int)
+
+    rows, total = DesignCache.list(page=page, size=size)
+
+    return jsonify({
+        'items': rows,
+        'total': total,
+        'page': page,
+        'size': size,
+    })
+
+@bp.route('/design-cache/<design_number>', methods=['GET'])
+@admin_required
+def design_cache_detail(design_number):
+    row = DesignCache.get(design_number)
+    if not row:
+        return jsonify({'error': '设计编号不存在'}), 404
+    return jsonify(row)
