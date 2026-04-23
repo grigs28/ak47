@@ -6,7 +6,7 @@
 <div id="notification-area"></div>
 
 <div class="row mb-4">
-    <div class="col-md-4">
+    <div class="col-md-3">
         <div class="card stat-card bg-primary text-white">
             <div class="card-body">
                 <h5>总目录数</h5>
@@ -14,7 +14,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-md-3">
         <div class="card stat-card bg-info text-white">
             <div class="card-body">
                 <h5>已扫描</h5>
@@ -22,11 +22,38 @@
             </div>
         </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-md-3">
         <div class="card stat-card bg-success text-white">
             <div class="card-body">
                 <h5>匹配数</h5>
                 <h2 id="matched-files">-</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card bg-dark text-white">
+            <div class="card-body">
+                <h5>状态</h5>
+                <h2 id="status-badge">-</h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <h6 class="text-muted">开始时间</h6>
+                <p class="mb-0 fs-5" id="start-time">-</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <h6 class="text-muted">已用时间</h6>
+                <p class="mb-0 fs-5" id="elapsed-time">-</p>
             </div>
         </div>
     </div>
@@ -86,6 +113,35 @@ function updateStatus() {
             document.getElementById('btn-start').disabled = status === 'running';
             document.getElementById('btn-pause').disabled = status !== 'running';
             document.getElementById('btn-resume').disabled = status !== 'paused';
+
+            // 状态徽章
+            const statusBadge = document.getElementById('status-badge');
+            const statusMap = {
+                'idle': {text: '空闲', cls: 'bg-secondary'},
+                'running': {text: '运行中', cls: 'bg-success'},
+                'paused': {text: '已暂停', cls: 'bg-warning text-dark'},
+                'completed': {text: '已完成', cls: 'bg-info'},
+            };
+            const s = statusMap[status] || {text: status || 'idle', cls: 'bg-secondary'};
+            statusBadge.innerHTML = '<span class="badge ' + s.cls + ' fs-6">' + s.text + '</span>';
+
+            // 开始时间和已用时间
+            if (data.started_at) {
+                const startTime = new Date(data.started_at);
+                document.getElementById('start-time').textContent = startTime.toLocaleString();
+                const elapsed = Math.floor((Date.now() - startTime.getTime()) / 1000);
+                const hours = Math.floor(elapsed / 3600);
+                const mins = Math.floor((elapsed % 3600) / 60);
+                const secs = elapsed % 60;
+                let elapsedStr = '';
+                if (hours > 0) elapsedStr += hours + '时';
+                if (mins > 0 || hours > 0) elapsedStr += mins + '分';
+                elapsedStr += secs + '秒';
+                document.getElementById('elapsed-time').textContent = elapsedStr;
+            } else {
+                document.getElementById('start-time').textContent = '-';
+                document.getElementById('elapsed-time').textContent = '-';
+            }
 
             if (status === 'completed') {
                 showNotification('扫描完成！共发现 ' + data.matched_files + ' 个匹配文件', 'success');
