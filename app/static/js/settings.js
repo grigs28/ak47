@@ -3,7 +3,7 @@ const CONFIG_GROUPS = {
     ai: ['qwen_base_url', 'qwen_api_key', 'qwen_model', 'ai_enabled'],
     auth: ['yz_login_url'],
     db: ['db_host', 'db_port', 'db_name', 'db_user', 'db_password'],
-    scan: ['scan_threads'],
+    scan: ['scan_threads', 'scan_exclude_dirs'],
 };
 
 let allConfigs = {};

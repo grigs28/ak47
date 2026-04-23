@@ -105,6 +105,9 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'scan_threads') THEN
         INSERT INTO system_config (key, value, description) VALUES ('scan_threads', '3', '扫描线程数（1-5）');
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'scan_exclude_dirs') THEN
+        INSERT INTO system_config (key, value, description) VALUES ('scan_exclude_dirs', '', '排除目录（逗号分隔）');
+    END IF;
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'ai_enabled') THEN
         INSERT INTO system_config (key, value, description) VALUES ('ai_enabled', 'true', '启用 AI 辅助匹配');
     END IF;

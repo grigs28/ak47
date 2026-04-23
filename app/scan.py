@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.smb import SMBManager
 from app.vision import InfoExtractor, InstructionClassifier, VisionOCRClient
 from app.vision.models import TempFile, DesignCache, ScannedDirectory, design_cache_memory
-from app.models import ScanProgress, ScannedFile
+from app.models import ScanProgress, ScannedFile, SystemConfig
 
 
 class Scanner:
@@ -27,17 +27,31 @@ class Scanner:
             ScanProgress.reset()
             progress = ScanProgress.get()
 
+        # 读取排除目录配置
+        exclude_dirs = self._get_exclude_dirs()
+
         # 按 mtime 最新优先，每次取 20 个项目
         dirs, total_dirs = self.smb.list_dirs(page=1, size=20)
 
-        # 快速估算文件数（不递归遍历）
-        estimated_files = 0
-        for dirname, _ in dirs:
+        # 过滤排除目录
+        dirs = [(d, m) for d, m in dirs if d not in exclude_dirs]
+
+        # 快速估算每个目录的PDF文件数，按文件数降序排列（大目录优先）
+        dir_with_count = []
+        for dirname, mtime in dirs:
             try:
-                pdfs = self.smb.list_pdfs(dirname, recursive=False)
-                estimated_files += len(pdfs)
+                # 浅层快速统计，限制深度3层避免卡住
+                pdfs = self.smb.list_pdfs(dirname, recursive=True, max_depth=3)
+                count = len(pdfs)
             except Exception:
-                pass
+                count = 0
+            dir_with_count.append((dirname, mtime, count))
+
+        # 按PDF文件数降序排列（大目录优先），文件数相同则按mtime最新优先
+        dir_with_count.sort(key=lambda x: (-x[2], -x[1]))
+        dirs = [(d[0], d[1]) for d in dir_with_count]
+
+        estimated_files = sum(d[2] for d in dir_with_count)
 
         ScanProgress.update(
             status='running',
@@ -66,8 +80,8 @@ class Scanner:
                 started_at='NOW()',
             )
 
-            # 递归获取所有PDF（限制深度10层）
-            pdfs = self.smb.list_pdfs(dirname, recursive=True, max_depth=10)
+            # 递归获取所有PDF（最大深度256层）
+            pdfs = self.smb.list_pdfs(dirname, recursive=True, max_depth=256)
 
             if not pdfs:
                 print(f"[INFO] 项目 {dirname} 没有PDF文件")
@@ -349,6 +363,13 @@ class Scanner:
             md_content=md_content,
             scanned_at='NOW()',
         )
+
+    def _get_exclude_dirs(self):
+        """读取排除目录配置，逗号分隔"""
+        exclude_str = SystemConfig.get('scan_exclude_dirs', '')
+        if not exclude_str:
+            return set()
+        return set(d.strip() for d in exclude_str.split(',') if d.strip())
 
     def mark_project_completed(self, directory):
         """标记项目完成并清理临时文件"""
