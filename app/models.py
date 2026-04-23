@@ -40,7 +40,7 @@ class ScannedFile:
         return query(f"SELECT * FROM {cls.TABLE} WHERE file_path = %s", (file_path,), fetchone=True)
 
     @classmethod
-    def list(cls, directory=None, selected=None, ai_matched=None, page=1, size=20):
+    def list(cls, directory=None, selected=None, ai_matched=None, design_number=None, page=1, size=20):
         where = []
         params = []
         if directory:
@@ -52,6 +52,9 @@ class ScannedFile:
         if ai_matched is not None:
             where.append("ai_matched = %s")
             params.append(ai_matched)
+        if design_number:
+            where.append("设计编号 = %s")
+            params.append(design_number)
 
         where_clause = f"WHERE {' AND '.join(where)}" if where else ""
         offset = (page - 1) * size
