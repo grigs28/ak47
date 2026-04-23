@@ -37,3 +37,9 @@ def settings():
 @admin_required
 def logs():
     return render_template('logs.html')
+
+@bp.route('/scan')
+@admin_required
+def scan():
+    return render_template('scan.html',
+                         username=session.get('display_name', session.get('username', 'Admin')))

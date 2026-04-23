@@ -1,0 +1,324 @@
+{% extends "base.html" %}
+
+{% block title %}扫描 - PDF 扫描器{% endblock %}
+
+{% block content %}
+<div id="notification-area"></div>
+
+<ul class="nav nav-tabs mb-3" id="scanTab" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="smb-tab" data-bs-toggle="tab" data-bs-target="#smb" type="button" role="tab">
+            <i class="bi bi-hdd-network me-1"></i>SMB 文件源
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="params-tab" data-bs-toggle="tab" data-bs-target="#params" type="button" role="tab">
+            <i class="bi bi-sliders me-1"></i>扫描参数
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="control-tab" data-bs-toggle="tab" data-bs-target="#control" type="button" role="tab">
+            <i class="bi bi-play-circle me-1"></i>开始扫描
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content" id="scanTabContent">
+    <!-- SMB 文件源 -->
+    <div class="tab-pane fade show active" id="smb" role="tabpanel">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-hdd-network me-2"></i>SMB 连接状态</span>
+                <button class="btn btn-sm btn-outline-primary" onclick="testSMB()">
+                    <i class="bi bi-arrow-clockwise me-1"></i>刷新
+                </button>
+            </div>
+            <div class="card-body">
+                <div id="smb-status" class="mb-3">
+                    <div class="d-flex align-items-center">
+                        <span class="badge bg-secondary me-2" id="smb-badge">检查中...</span>
+                        <span id="smb-message">-</span>
+                    </div>
+                </div>
+                <div id="smb-dirs-section" class="d-none">
+                    <h6 class="mt-3">目录列表（按最新修改排序）</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped">
+                            <thead><tr><th>目录名</th><th>修改时间</th></tr></thead>
+                            <tbody id="smb-dirs"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 扫描参数 -->
+    <div class="tab-pane fade" id="params" role="tabpanel">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-sliders me-2"></i>扫描配置
+            </div>
+            <div class="card-body">
+                <div id="scan-configs"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 开始扫描 -->
+    <div class="tab-pane fade" id="control" role="tabpanel">
+        <div class="row">
+            <div class="col-md-8">
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <i class="bi bi-play-circle me-2"></i>扫描控制
+                    </div>
+                    <div class="card-body">
+                        <div class="btn-group mb-3">
+                            <button id="btn-start" class="btn btn-success" onclick="startScan()">
+                                <i class="bi bi-play-fill me-1"></i>开始扫描
+                            </button>
+                            <button id="btn-pause" class="btn btn-warning" onclick="pauseScan()">
+                                <i class="bi bi-pause-fill me-1"></i>暂停
+                            </button>
+                            <button id="btn-resume" class="btn btn-info" onclick="resumeScan()">
+                                <i class="bi bi-arrow-clockwise me-1"></i>恢复
+                            </button>
+                            <button id="btn-reset" class="btn btn-danger" onclick="resetScan()">
+                                <i class="bi bi-x-circle me-1"></i>重置
+                            </button>
+                        </div>
+
+                        <h6>扫描进度</h6>
+                        <div class="progress mb-2">
+                            <div id="progress-bar" class="progress-bar progress-bar-striped" role="progressbar" style="width: 0%">0%</div>
+                        </div>
+                        <p class="text-muted mb-1" id="current-file">当前文件：-</p>
+                        <p class="text-muted mb-1" id="current-dir">当前目录：-</p>
+                        <p class="text-muted" id="scan-status-text">状态：-</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <i class="bi bi-speedometer2 me-2"></i>扫描统计
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <div class="border rounded p-2 text-center">
+                                    <div class="text-muted small">总目录</div>
+                                    <div class="fs-4 fw-bold" id="total-dirs">-</div>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="border rounded p-2 text-center">
+                                    <div class="text-muted small">总文件</div>
+                                    <div class="fs-4 fw-bold" id="total-files">-</div>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="border rounded p-2 text-center">
+                                    <div class="text-muted small">已扫描</div>
+                                    <div class="fs-4 fw-bold text-primary" id="scanned-files">-</div>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="border rounded p-2 text-center">
+                                    <div class="text-muted small">已匹配</div>
+                                    <div class="fs-4 fw-bold text-success" id="matched-files">-</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-clock-history me-2"></i>扫描情况
+                    </div>
+                    <div class="card-body">
+                        <div id="scan-situation">
+                            <p class="text-muted small mb-1">临时库：<span id="temp-count">-</span></p>
+                            <p class="text-muted small mb-1">正式库：<span id="formal-count">-</span></p>
+                            <p class="text-muted small mb-1">已标记设计编号：<span id="cache-count">-</span></p>
+                            <p class="text-muted small mb-0">当前设计编号：<span id="current-design">-</span></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let statusInterval;
+
+function updateStatus() {
+    fetch('/api/scan/status')
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('total-dirs').textContent = data.total_dirs || 0;
+            document.getElementById('total-files').textContent = data.total_files || 0;
+            document.getElementById('scanned-files').textContent = data.scanned_files || 0;
+            document.getElementById('matched-files').textContent = data.matched_files || 0;
+
+            const total = data.total_files || 1;
+            const scanned = data.scanned_files || 0;
+            const pct = Math.round((scanned / total) * 100);
+            const bar = document.getElementById('progress-bar');
+            bar.style.width = pct + '%';
+            bar.textContent = pct + '%';
+            if (data.status === 'running') {
+                bar.classList.add('progress-bar-animated');
+            } else {
+                bar.classList.remove('progress-bar-animated');
+            }
+
+            document.getElementById('current-file').textContent = '当前文件：' + (data.current_file || '-');
+            document.getElementById('current-dir').textContent = '当前目录：' + (data.current_dir || '-');
+            document.getElementById('scan-status-text').textContent = '状态：' + (data.status || 'idle');
+            document.getElementById('current-design').textContent = data.current_design_number || '-';
+
+            const status = data.status;
+            document.getElementById('btn-start').disabled = status === 'running';
+            document.getElementById('btn-pause').disabled = status !== 'running';
+            document.getElementById('btn-resume').disabled = status !== 'paused';
+
+            if (status === 'completed') {
+                showNotification('扫描完成！共发现 ' + data.matched_files + ' 个匹配文件', 'success');
+            }
+        });
+
+    fetch('/api/temp-files?size=1')
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('temp-count').textContent = data.total || 0;
+        });
+
+    fetch('/api/files?size=1')
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('formal-count').textContent = data.total || 0;
+        });
+
+    fetch('/api/design-cache?size=1')
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('cache-count').textContent = data.total || 0;
+        });
+}
+
+function testSMB() {
+    const badge = document.getElementById('smb-badge');
+    const msg = document.getElementById('smb-message');
+    badge.className = 'badge bg-warning me-2';
+    badge.textContent = '检查中...';
+    msg.textContent = '';
+
+    fetch('/api/config/test-smb', {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                badge.className = 'badge bg-success me-2';
+                badge.textContent = '已连接';
+                msg.textContent = data.message;
+                loadSMBDirs();
+            } else {
+                badge.className = 'badge bg-danger me-2';
+                badge.textContent = '未连接';
+                msg.textContent = data.message;
+            }
+        })
+        .catch(e => {
+            badge.className = 'badge bg-danger me-2';
+            badge.textContent = '错误';
+            msg.textContent = e.message;
+        });
+}
+
+function loadSMBDirs() {
+    fetch('/api/browse')
+        .then(r => r.json())
+        .then(data => {
+            const tbody = document.getElementById('smb-dirs');
+            if (data.items) {
+                tbody.innerHTML = data.items.map(d => {
+                    const mtime = d.mtime ? new Date(d.mtime * 1000).toLocaleString() : '-';
+                    return '<tr><td>' + escapeHtml(d.name) + '</td><td>' + mtime + '</td></tr>';
+                }).join('');
+                document.getElementById('smb-dirs-section').classList.remove('d-none');
+            }
+        })
+        .catch(() => {
+            document.getElementById('smb-dirs-section').classList.add('d-none');
+        });
+}
+
+function loadScanConfigs() {
+    fetch('/api/config')
+        .then(r => r.json())
+        .then(data => {
+            const container = document.getElementById('scan-configs');
+            const scanKeys = ['scan_concurrency', 'gbt_standard'];
+            const configs = data.configs.filter(c => scanKeys.includes(c.key));
+            if (configs.length === 0) {
+                container.innerHTML = '<p class="text-muted">暂无扫描参数配置</p>';
+                return;
+            }
+            container.innerHTML = configs.map(c => {
+                return '<div class="mb-3"><label class="form-label fw-semibold">' + escapeHtml(c.description || c.key) + '</label>' +
+                       '<input type="text" class="form-control" value="' + escapeHtml(c.value || '') + '" readonly></div>';
+            }).join('');
+        });
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function startScan() {
+    fetch('/api/scan/start', {method: 'POST'}).then(() => updateStatus());
+}
+
+function pauseScan() {
+    fetch('/api/scan/pause', {method: 'POST'}).then(() => updateStatus());
+}
+
+function resumeScan() {
+    fetch('/api/scan/resume', {method: 'POST'}).then(() => updateStatus());
+}
+
+function resetScan() {
+    if (!confirm('确定重置扫描进度？')) return;
+    fetch('/api/scan/reset', {method: 'POST'}).then(() => updateStatus());
+}
+
+function showNotification(msg, type) {
+    const area = document.getElementById('notification-area');
+    const div = document.createElement('div');
+    div.className = 'alert alert-' + type + ' alert-dismissible fade show';
+    div.textContent = msg;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-close';
+    btn.setAttribute('data-bs-dismiss', 'alert');
+    div.appendChild(btn);
+    area.appendChild(div);
+}
+
+// Tab 切换时加载对应内容
+document.getElementById('smb-tab').addEventListener('shown.bs.tab', testSMB);
+document.getElementById('params-tab').addEventListener('shown.bs.tab', loadScanConfigs);
+document.getElementById('control-tab').addEventListener('shown.bs.tab', updateStatus);
+
+// 初始加载
+testSMB();
+updateStatus();
+statusInterval = setInterval(updateStatus, 3000);
+</script>
+{% endblock %}
