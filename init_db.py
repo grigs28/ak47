@@ -127,6 +127,51 @@ BEGIN
         INSERT INTO system_config (key, value, description) VALUES ('db_password', '', '数据库密码');
     END IF;
 END $$;
+
+CREATE TABLE IF NOT EXISTS temp_files (
+    id              SERIAL PRIMARY KEY,
+    file_path       VARCHAR(1000) NOT NULL,
+    directory       VARCHAR(500) NOT NULL,
+    filename        VARCHAR(500) NOT NULL,
+    file_size       BIGINT,
+
+    建设单位        VARCHAR(500),
+    工程名称        VARCHAR(1000),
+    设计编号        VARCHAR(100) NOT NULL,
+    图名            VARCHAR(500),
+    图号            VARCHAR(50),
+    图别            VARCHAR(50),
+
+    is_instruction  BOOLEAN DEFAULT NULL,
+    status          VARCHAR(20) DEFAULT 'pending',
+
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_temp_files_design_number ON temp_files(设计编号);
+CREATE INDEX IF NOT EXISTS idx_temp_files_status ON temp_files(status);
+
+CREATE TABLE IF NOT EXISTS design_cache (
+    设计编号        VARCHAR(100) PRIMARY KEY,
+    建设单位        VARCHAR(500),
+    工程名称        VARCHAR(1000),
+    has_instruction BOOLEAN DEFAULT FALSE,
+    instruction_count INTEGER DEFAULT 0,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS 建设单位 VARCHAR(500);
+ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS 工程名称 VARCHAR(1000);
+ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS 设计编号 VARCHAR(100);
+ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS 图名 VARCHAR(500);
+ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS 图号 VARCHAR(50);
+ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS 图别 VARCHAR(50);
+ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS json_result JSONB;
+ALTER TABLE scanned_files ADD COLUMN IF NOT EXISTS is_instruction BOOLEAN DEFAULT FALSE;
+
+CREATE INDEX IF NOT EXISTS idx_scanned_files_design_number ON scanned_files(设计编号);
 """
 
 def init():
