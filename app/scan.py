@@ -68,11 +68,8 @@ class Scanner:
                 started_at='NOW()',
             )
 
-            # 递归获取所有PDF（最大深度256层，限制单个目录最多1000个文件避免卡住）
-            pdfs = self.smb.list_pdfs(dirname, recursive=True, max_depth=256)
-            if len(pdfs) > 1000:
-                print(f"[WARN] 项目 {dirname} 有 {len(pdfs)} 个PDF，限制处理前1000个")
-                pdfs = pdfs[:1000]
+            # 增量式获取PDF并处理，边遍历边更新进度
+            pdfs = self._list_pdfs_incremental(dirname, max_depth=256, max_files=1000)
 
             if not pdfs:
                 print(f"[INFO] 项目 {dirname} 没有PDF文件")
@@ -356,6 +353,53 @@ class Scanner:
             md_content=md_content,
             scanned_at='NOW()',
         )
+
+    def _list_pdfs_incremental(self, dirname, max_depth=256, max_files=1000):
+        """增量式获取PDF文件，边遍历边更新进度"""
+        import os
+        mount_path = self.smb.get_mount_path()
+        dir_path = os.path.join(mount_path, dirname)
+
+        real_dir = os.path.realpath(dir_path)
+        real_mount = os.path.realpath(mount_path)
+        if not real_dir.startswith(real_mount):
+            raise ValueError("Invalid directory path")
+
+        pdfs = []
+        base_depth = real_dir.rstrip(os.sep).count(os.sep)
+
+        for root, dirs, files in os.walk(real_dir):
+            current_depth = root.rstrip(os.sep).count(os.sep)
+            if current_depth - base_depth >= max_depth:
+                del dirs[:]
+                continue
+
+            for name in sorted(files):
+                if name.lower().endswith('.pdf'):
+                    full = os.path.join(root, name)
+                    rel_path = os.path.relpath(full, mount_path)
+                    try:
+                        size = os.path.getsize(full)
+                    except OSError:
+                        size = 0
+                    pdfs.append({
+                        'name': name,
+                        'size': size,
+                        'path': rel_path,
+                    })
+
+                    # 每找到50个PDF更新一次进度
+                    if len(pdfs) % 50 == 0:
+                        ScanProgress.update(
+                            current_dir=dirname,
+                            current_file=f'已发现 {len(pdfs)} 个PDF...',
+                        )
+
+                    if len(pdfs) >= max_files:
+                        print(f"[WARN] 项目 {dirname} PDF数量超过{max_files}，截断")
+                        return pdfs
+
+        return pdfs
 
     def _get_exclude_dirs(self):
         """读取排除目录配置，逗号分隔"""
