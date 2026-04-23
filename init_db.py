@@ -111,6 +111,21 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'gbt_standard') THEN
         INSERT INTO system_config (key, value, description) VALUES ('gbt_standard', 'GBT 50378-2019(2024年版)', '标准名称');
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'db_host') THEN
+        INSERT INTO system_config (key, value, description) VALUES ('db_host', '192.168.0.98', '数据库地址');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'db_port') THEN
+        INSERT INTO system_config (key, value, description) VALUES ('db_port', '5432', '数据库端口');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'db_name') THEN
+        INSERT INTO system_config (key, value, description) VALUES ('db_name', 'yz_relay', '数据库名');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'db_user') THEN
+        INSERT INTO system_config (key, value, description) VALUES ('db_user', 'grigs', '数据库用户名');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'db_password') THEN
+        INSERT INTO system_config (key, value, description) VALUES ('db_password', '', '数据库密码');
+    END IF;
 END $$;
 """
 

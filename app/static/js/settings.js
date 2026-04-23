@@ -4,6 +4,7 @@ const CONFIG_GROUPS = {
     ai: ['qwen_base_url', 'qwen_api_key', 'qwen_model', 'ai_enabled'],
     scan: ['scan_concurrency', 'gbt_standard'],
     auth: ['yz_login_url'],
+    db: ['db_host', 'db_port', 'db_name', 'db_user', 'db_password'],
 };
 
 let allConfigs = {};
