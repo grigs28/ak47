@@ -357,7 +357,9 @@ class Scanner:
     def _list_pdfs_incremental(self, dirname, max_depth=256, max_files=1000):
         """增量式获取PDF文件，边遍历边更新进度"""
         import os
-        mount_path = self.smb.get_mount_path()
+        mount_path = self.smb._find_mount_path_for_dir(dirname)
+        if not mount_path:
+            return []
         dir_path = os.path.join(mount_path, dirname)
 
         real_dir = os.path.realpath(dir_path)

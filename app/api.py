@@ -285,12 +285,13 @@ def config_update(key):
 @admin_required
 def test_smb():
     try:
-        if SMBManager.is_mounted():
-            SMBManager.umount()
-            return jsonify({'success': False, 'message': 'SMB 已卸载'})
-        SMBManager.mount()
-        is_mounted = SMBManager.is_mounted()
-        return jsonify({'success': is_mounted, 'message': 'SMB 挂载成功' if is_mounted else 'SMB 挂载失败'})
+        if SMBManager.is_any_mounted():
+            SMBManager.umount_all()
+            return jsonify({'success': False, 'message': 'SMB 已全部卸载'})
+        SMBManager.mount_all()
+        shares = SMBManager.get_shares()
+        mounted_count = sum(1 for s in shares if s.get('mounted'))
+        return jsonify({'success': mounted_count > 0, 'message': f'已挂载 {mounted_count}/{len(shares)} 个共享路径'})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
@@ -298,10 +299,38 @@ def test_smb():
 @admin_required
 def smb_status():
     try:
-        is_mounted = SMBManager.is_mounted()
-        return jsonify({'mounted': is_mounted})
+        shares = SMBManager.get_shares()
+        mounted_count = sum(1 for s in shares if s.get('mounted'))
+        return jsonify({
+            'mounted': mounted_count > 0,
+            'shares': shares,
+            'mounted_count': mounted_count,
+        })
     except Exception as e:
         return jsonify({'mounted': False, 'error': str(e)}), 500
+
+@bp.route('/config/smb-shares', methods=['GET'])
+@admin_required
+def smb_shares_list():
+    """获取所有共享路径配置"""
+    shares = SMBManager.get_shares()
+    return jsonify({'shares': shares})
+
+@bp.route('/config/smb-shares', methods=['PUT'])
+@admin_required
+def smb_shares_update():
+    """更新共享路径列表"""
+    data = request.get_json() or {}
+    shares = data.get('shares', [])
+    SMBManager.save_shares(shares)
+
+    OperationLog.create(
+        user_id=session.get('user_id', 0),
+        username=session.get('username', ''),
+        action='update_smb_shares',
+    )
+
+    return jsonify({'message': '共享路径已更新', 'count': len(shares)})
 
 @bp.route('/config/test-ocr', methods=['POST'])
 @admin_required

@@ -42,7 +42,12 @@
                         </div>
                         <div class="mb-3">
                             <label class="form-label small fw-semibold">共享路径</label>
-                            <input type="text" class="form-control form-control-sm" id="smb-share" placeholder="abb/FS/10/D$/tbmdata/data/ftpdata">
+                            <div id="shares-list"></div>
+                            <div class="input-group input-group-sm mt-1">
+                                <input type="text" class="form-control" id="share-name-input" placeholder="名称（如：主路径）">
+                                <input type="text" class="form-control" id="share-path-input" placeholder="路径（如：abb/FS/10/D$/tbmdata/data/ftpdata）">
+                                <button class="btn btn-outline-success" onclick="addShare()" type="button">添加</button>
+                            </div>
                         </div>
                         <div class="mb-3">
                             <label class="form-label small fw-semibold">用户名</label>
@@ -417,6 +422,8 @@ function loadSMBDirs(page) {
         });
 }
 
+let smbShares = [];  // [{name, server, share}]
+
 function loadSMBForm() {
     fetch('/api/config')
         .then(r => r.json())
@@ -424,7 +431,6 @@ function loadSMBForm() {
             const configs = {};
             data.configs.forEach(c => configs[c.key] = c.value || '');
             document.getElementById('smb-server').value = configs['smb_server'] || '';
-            document.getElementById('smb-share').value = configs['smb_share'] || '';
             document.getElementById('smb-username').value = configs['smb_username'] || '';
             document.getElementById('smb-password').value = configs['smb_password'] || '';
             document.getElementById('smb-domain').value = configs['smb_domain'] || '';
@@ -432,11 +438,56 @@ function loadSMBForm() {
             document.getElementById('gbt-standard').value = configs['gbt_standard'] || '';
             document.getElementById('scan-exclude-dirs').value = configs['scan_exclude_dirs'] || '';
         });
+
+    // 加载共享路径列表
+    fetch('/api/config/smb-shares')
+        .then(r => r.json())
+        .then(data => {
+            smbShares = data.shares || [];
+            renderSharesList();
+        })
+        .catch(() => {
+            smbShares = [];
+            renderSharesList();
+        });
+}
+
+function renderSharesList() {
+    const container = document.getElementById('shares-list');
+    if (!smbShares.length) {
+        container.innerHTML = '<p class="text-muted small mb-0">暂无共享路径</p>';
+        return;
+    }
+    container.innerHTML = smbShares.map((s, i) => {
+        const statusIcon = s.mounted
+            ? '<i class="bi bi-check-circle-fill text-success me-1"></i>'
+            : '<i class="bi bi-x-circle text-muted me-1"></i>';
+        return '<div class="d-flex justify-content-between align-items-center border rounded p-1 mb-1">'
+            + '<span class="small">' + statusIcon + '<strong>' + escapeHtml(s.name) + '</strong> <span class="text-muted">' + escapeHtml(s.share) + '</span></span>'
+            + '<button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="removeShare(' + i + ')" type="button"><i class="bi bi-trash"></i></button>'
+            + '</div>';
+    }).join('');
+}
+
+function addShare() {
+    const name = document.getElementById('share-name-input').value.trim();
+    const share = document.getElementById('share-path-input').value.trim();
+    if (!name || !share) return;
+    smbShares.push({name: name, server: '', share: share});
+    document.getElementById('share-name-input').value = '';
+    document.getElementById('share-path-input').value = '';
+    renderSharesList();
+}
+
+function removeShare(index) {
+    smbShares.splice(index, 1);
+    renderSharesList();
 }
 
 function saveSMBConfig() {
-    const keys = ['smb_server', 'smb_share', 'smb_username', 'smb_password', 'smb_domain', 'scan_concurrency', 'gbt_standard', 'scan_exclude_dirs'];
-    const ids = ['smb-server', 'smb-share', 'smb-username', 'smb-password', 'smb-domain', 'scan-concurrency', 'gbt-standard', 'scan-exclude-dirs'];
+    // 保存通用配置
+    const keys = ['smb_server', 'smb_username', 'smb_password', 'smb_domain', 'scan_concurrency', 'gbt_standard', 'scan_exclude_dirs'];
+    const ids = ['smb-server', 'smb-username', 'smb-password', 'smb-domain', 'scan-concurrency', 'gbt-standard', 'scan-exclude-dirs'];
     const promises = keys.map((key, i) => {
         const value = document.getElementById(ids[i]).value;
         return fetch('/api/config/' + key, {
@@ -445,6 +496,14 @@ function saveSMBConfig() {
             body: JSON.stringify({value}),
         });
     });
+
+    // 保存共享路径列表
+    promises.push(fetch('/api/config/smb-shares', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({shares: smbShares}),
+    }));
+
     Promise.all(promises).then(() => {
         const span = document.getElementById('smb-save-result');
         span.textContent = '已保存';

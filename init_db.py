@@ -84,6 +84,9 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'smb_mount_path') THEN
         INSERT INTO system_config (key, value, description) VALUES ('smb_mount_path', '', '容器内挂载点（自动生成后锁定）');
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'smb_shares') THEN
+        INSERT INTO system_config (key, value, description) VALUES ('smb_shares', '[{"name":"主路径","server":"","share":"abb/FS/10/D$/tbmdata/data/ftpdata"}]', '共享路径列表（JSON）');
+    END IF;
     IF NOT EXISTS (SELECT 1 FROM system_config WHERE key = 'paddleocr_base_url') THEN
         INSERT INTO system_config (key, value, description) VALUES ('paddleocr_base_url', 'http://192.168.0.19:5553', 'API 地址');
     END IF;
