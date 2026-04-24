@@ -7,6 +7,8 @@ from app.smb import SMBManager
 from app.ocr import OCRClient
 from app.ai import AIMatcher
 from app.db import close_db
+import os
+import subprocess
 
 bp = Blueprint('api', __name__)
 
@@ -331,6 +333,32 @@ def smb_shares_update():
     )
 
     return jsonify({'message': '共享路径已更新', 'count': len(shares)})
+
+@bp.route('/config/smb-mount-single', methods=['POST'])
+@admin_required
+def smb_mount_single():
+    """挂载单个共享路径"""
+    try:
+        data = request.get_json() or {}
+        share = data.get('share', {})
+        SMBManager.mount_share(share)
+        return jsonify({'success': True, 'message': '挂载成功'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@bp.route('/config/smb-umount-single', methods=['POST'])
+@admin_required
+def smb_umount_single():
+    """卸载单个共享路径"""
+    try:
+        data = request.get_json() or {}
+        share = data.get('share', {})
+        mount_path = SMBManager._get_mount_path_for_share(share)
+        if os.path.ismount(mount_path):
+            subprocess.run(['sudo', '-S', 'umount', mount_path], capture_output=True, text=True, input='Slnwg123$\n')
+        return jsonify({'success': True, 'message': '已卸载'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 @bp.route('/config/test-ocr', methods=['POST'])
 @admin_required

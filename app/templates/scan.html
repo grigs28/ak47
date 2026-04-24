@@ -459,20 +459,27 @@ function renderSharesList() {
         return;
     }
     container.innerHTML = smbShares.map((s, i) => {
-        const statusIcon = s.mounted
-            ? '<i class="bi bi-check-circle-fill text-success me-1"></i>'
-            : '<i class="bi bi-x-circle text-muted me-1"></i>';
+        const badge = s.mounted
+            ? '<span class="badge bg-success me-1">已挂载</span>'
+            : '<span class="badge bg-secondary me-1">未挂载</span>';
+        const mountBtn = s.mounted
+            ? '<button class="btn btn-outline-warning btn-sm py-0 px-1" onclick="umountSingle(' + i + ')" type="button" title="卸载"><i class="bi bi-plug"></i></button>'
+            : '<button class="btn btn-outline-success btn-sm py-0 px-1" onclick="mountSingle(' + i + ')" type="button" title="挂载"><i class="bi bi-plug-fill"></i></button>';
         return '<div class="d-flex justify-content-between align-items-center border rounded p-1 mb-1">'
-            + '<span class="small">' + statusIcon + '<strong>' + escapeHtml(s.name) + '</strong> <span class="text-muted">' + escapeHtml(s.share) + '</span></span>'
-            + '<button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="removeShare(' + i + ')" type="button"><i class="bi bi-trash"></i></button>'
-            + '</div>';
+            + '<span class="small text-truncate" style="max-width:60%">' + badge + '<strong>' + escapeHtml(s.name) + '</strong> <span class="text-muted">' + escapeHtml(s.share) + '</span></span>'
+            + '<div class="btn-group btn-group-sm">'
+            + mountBtn
+            + '<button class="btn btn-outline-danger py-0 px-1" onclick="removeShare(' + i + ')" type="button" title="删除"><i class="bi bi-trash"></i></button>'
+            + '</div></div>';
     }).join('');
 }
 
 function addShare() {
     const name = document.getElementById('share-name-input').value.trim();
-    const share = document.getElementById('share-path-input').value.trim();
+    let share = document.getElementById('share-path-input').value.trim();
     if (!name || !share) return;
+    // 自动转换 Windows 反斜杠为正斜杠，去掉开头的反斜杠
+    share = share.replace(/\\\\/g, '/').replace(/\\/g, '/').replace(/^\/+/, '');
     smbShares.push({name: name, server: '', share: share});
     document.getElementById('share-name-input').value = '';
     document.getElementById('share-path-input').value = '';
@@ -482,6 +489,52 @@ function addShare() {
 function removeShare(index) {
     smbShares.splice(index, 1);
     renderSharesList();
+}
+
+function mountSingle(index) {
+    const s = smbShares[index];
+    if (!s) return;
+    const btn = event.target.closest('button');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+    fetch('/api/config/smb-mount-single', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({share: s}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            s.mounted = true;
+        } else {
+            alert(s.name + ' 挂载失败: ' + (data.message || '未知错误'));
+        }
+        renderSharesList();
+    })
+    .catch(e => {
+        alert('请求失败: ' + e.message);
+        renderSharesList();
+    });
+}
+
+function umountSingle(index) {
+    const s = smbShares[index];
+    if (!s) return;
+
+    fetch('/api/config/smb-umount-single', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({share: s}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        s.mounted = false;
+        renderSharesList();
+    })
+    .catch(e => {
+        renderSharesList();
+    });
 }
 
 function saveSMBConfig() {
