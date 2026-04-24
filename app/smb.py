@@ -46,23 +46,33 @@ class SMBManager:
                 s['server'] = cls._get_common_config()['server']
             mount_path = cls._get_mount_path_for_share(s)
             s['mount_path'] = mount_path
-            s['mounted'] = os.path.ismount(mount_path)
+            s['mounted'] = os.path.ismount(mount_path) if mount_path else False
         return shares
 
     @classmethod
     def _get_mount_path_for_share(cls, share):
-        """根据 share 配置生成挂载路径"""
+        """根据 share 配置找到或生成挂载路径"""
         share_path = share.get('share', '')
-        # 检查已有挂载点：扫描 ~/mnt/ak47/ 下的子目录
+        share_clean = share_path.lstrip('\\').replace('\\', '/')
         home = os.path.expanduser('~')
         ak47_base = os.path.join(home, 'mnt', 'ak47')
-        if os.path.isdir(ak47_base):
-            for name in os.listdir(ak47_base):
-                full = os.path.join(ak47_base, name)
-                if os.path.ismount(full):
-                    # 检查这个挂载点的 share 是否匹配
-                    # 简单匹配：如果 share 路径包含在挂载点的 URL 中
-                    return full  # 复用已挂载的目录
+
+        # 从 /proc/mounts 精确匹配挂载点
+        try:
+            with open('/proc/mounts', 'r') as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[2] == 'cifs':
+                        mount_url = parts[0]  # 如 //192.168.0.79/abb/FS
+                        mount_dir = parts[1]   # 如 /home/grigs/mnt/ak47/xxx
+                        if not mount_dir.startswith(ak47_base):
+                            continue
+                        # 精确匹配：mount_url 去掉 //server/ 后应该等于 share_clean
+                        url_path = mount_url.split('/', 3)[-1] if '/' in mount_url[2:] else ''
+                        if url_path == share_clean:
+                            return mount_dir
+        except Exception:
+            pass
 
         # 没有已挂载的，生成新路径
         safe_name = share_path.replace('/', '_').replace('\\', '_').replace('$', '').replace(' ', '')
