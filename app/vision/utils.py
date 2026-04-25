@@ -101,11 +101,11 @@ def get_crop_strategy(image_path):
     img = Image.open(image_path)
     w, h = img.size
     if h > w:
-        # 竖版：先底部，再顶部
-        return ['bottom', 'top']
+        # 竖幅：先上部，再下部
+        return ['top', 'bottom']
     else:
-        # 横版：先右侧，再左侧
-        return ['right', 'left']
+        # 横幅：先右侧
+        return ['right']
 
 
 # 注册进程退出清理

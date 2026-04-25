@@ -1,25 +1,18 @@
 import os
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.smb import SMBManager
-from app.vision import InfoExtractor, InstructionClassifier, VisionOCRClient
-from app.vision.models import TempFile, DesignCache, ScannedDirectory, design_cache_memory
-from app.models import ScanProgress, ScannedFile, SystemConfig
+from app.models import ScanProgress, SystemConfig
 
 
 class Scanner:
     def __init__(self):
         self.smb = SMBManager()
-        self.extractor = InfoExtractor()
-        self.classifier = InstructionClassifier()
-        self.ocr = VisionOCRClient()
-        # 线程锁，用于保护共享状态
         self._progress_lock = threading.Lock()
-        self._design_lock = threading.Lock()
-        self._current_file = None
 
     def scan_all(self):
+        """扫描入口：遍历目录，发现PDF后批量发送Celery任务到Redis队列"""
         # 加载设计编号缓存到内存
+        from app.vision.models import design_cache_memory
         design_cache_memory.load_from_db()
 
         progress = ScanProgress.get()
@@ -32,31 +25,82 @@ class Scanner:
         exclude_dirs = self._get_exclude_dirs()
         print(f"[INFO] 排除目录: {exclude_dirs}")
 
-        # 按 mtime 最新优先，每次取 20 个项目
-        dirs, total_dirs = self.smb.list_dirs(page=1, size=20)
+        # 读取选中的目录列表
+        selected_dirs = self._get_selected_dirs()
+        if selected_dirs is not None:
+            print(f"[INFO] 指定扫描目录: {len(selected_dirs)} 个")
+        else:
+            print(f"[INFO] 未指定目录，扫描全部")
+
+        # 读取年份筛选
+        year_filter = self._get_year_filter()
+        if year_filter:
+            print(f"[INFO] 年份筛选: 跳过修改时间早于 {year_filter} 年的目录")
+
+        # 如果指定了目录，需要取全部来匹配
+        page_size = 20
+        if selected_dirs is not None:
+            page_size = max(20, len(selected_dirs) + 10)
+
+        dirs, total_dirs = self.smb.list_dirs(page=1, size=page_size)
+
+        # 如果选中目录仍有遗漏，继续翻页
+        if selected_dirs is not None:
+            found = {d for d, m in dirs}
+            missing = set(selected_dirs) - found
+            page = 2
+            while missing:
+                more_dirs, _ = self.smb.list_dirs(page=page, size=page_size)
+                if not more_dirs:
+                    break
+                dirs.extend(more_dirs)
+                found.update(d for d, m in more_dirs)
+                missing = set(selected_dirs) - found
+                page += 1
+
+        # 统计跳过前的总数
+        before_filter = len(dirs)
 
         # 过滤排除目录
         dirs = [(d, m) for d, m in dirs if d not in exclude_dirs]
-        print(f"[INFO] 过滤后目录数: {len(dirs)}")
 
-        estimated_files = 0
+        # 过滤只保留选中的目录
+        if selected_dirs is not None:
+            selected_set = set(selected_dirs)
+            dirs = [(d, m) for d, m in dirs if d in selected_set]
+
+        # 年份筛选：跳过修改时间早于指定年份的目录
+        if year_filter:
+            from datetime import datetime
+            year_start = datetime(year_filter, 1, 1).timestamp()
+            dirs = [(d, m) for d, m in dirs if m >= year_start]
+
+        skipped_dirs = before_filter - len(dirs)
+        print(f"[INFO] 过滤后目录数: {len(dirs)}, 跳过: {skipped_dirs}")
 
         ScanProgress.update(
             status='running',
             total_dirs=total_dirs,
-            total_files=estimated_files,
+            skipped_dirs=skipped_dirs,
+            total_files=0,
             started_at='NOW()',
         )
 
         start_dir_idx = progress.get('dir_index', 0)
-
         scanned = progress.get('scanned_files', 0)
         matched = progress.get('matched_files', 0)
 
         for dir_idx in range(start_dir_idx, len(dirs)):
+            # 检查是否被重置
+            cur = ScanProgress.get()
+            if cur['status'] == 'idle':
+                print(f"[INFO] 扫描已被重置，退出")
+                return {'status': 'cancelled'}
+
             dirname, _ = dirs[dir_idx]
 
             # 跳过已完成的项目
+            from app.vision.models import ScannedDirectory
             if ScannedDirectory.is_completed(dirname):
                 print(f"[SKIP] 项目 {dirname} 已完成，跳过")
                 continue
@@ -68,10 +112,15 @@ class Scanner:
                 started_at='NOW()',
             )
 
-            # 增量式获取PDF并处理，边遍历边更新进度
-            pdfs = self._list_pdfs_incremental(dirname, max_depth=256, max_files=1000)
+            # 清空该目录的临时文件
+            from app.db import execute
+            execute("DELETE FROM temp_files WHERE directory = %s", (dirname,))
+            print(f"[INFO] 已清空项目 {dirname} 的临时文件")
 
-            if not pdfs:
+            # === 发现PDF → 批量发送Celery任务 ===
+            result = self._scan_and_dispatch(dirname)
+
+            if result.get('status') == 'no_pdfs':
                 print(f"[INFO] 项目 {dirname} 没有PDF文件")
                 ScannedDirectory.create_or_update(
                     dirname,
@@ -80,22 +129,11 @@ class Scanner:
                 )
                 continue
 
-            print(f"[INFO] 项目 {dirname} 找到 {len(pdfs)} 个PDF，启动3线程扫描")
-
-            # 更新总文件数（实际值）
-            ScanProgress.update(total_files=len(pdfs))
-
-            # === 多线程扫描 ===
-            result = self._scan_directory_multi_thread(dirname, pdfs)
-
             if result['status'] == 'paused':
-                # 暂停时保存进度
                 with self._progress_lock:
                     ScanProgress.update(
                         current_dir=dirname,
                         dir_index=dir_idx,
-                        scanned_files=result.get('scanned', scanned),
-                        matched_files=result.get('matched', matched),
                     )
                 return {'status': 'paused'}
 
@@ -106,7 +144,7 @@ class Scanner:
             ScannedDirectory.create_or_update(
                 dirname,
                 status='pending',
-                total_files=len(pdfs),
+                total_files=result.get('total_files', 0),
                 scanned_files=scanned,
                 matched_files=matched,
             )
@@ -118,261 +156,47 @@ class Scanner:
 
         return {'status': 'completed', 'scanned': scanned, 'matched': matched}
 
-    def _scan_directory_multi_thread(self, dirname, pdfs):
-        """多线程扫描单个目录，线程数由系统配置决定（默认3线程）"""
-        from app.models import SystemConfig
-        num_threads = int(SystemConfig.get('scan_threads', '3'))
-        num_threads = max(1, min(num_threads, 5))  # 限制1-5线程
-
-        # 将文件分成N组
-        file_groups = self._split_files_for_threads(pdfs, num_threads)
-
-        scanned = 0
-        matched = 0
-        paused = False
-
-        print(f"[INFO] 项目 {dirname} 启动 {num_threads} 线程扫描")
-
-        with ThreadPoolExecutor(max_workers=num_threads) as executor:
-            # 提交N个线程任务
-            futures = {
-                executor.submit(self._thread_worker, dirname, files, thread_id): thread_id
-                for thread_id, files in file_groups.items()
-            }
-
-            for future in as_completed(futures):
-                thread_id = futures[future]
-                try:
-                    result = future.result()
-                    if result.get('status') == 'paused':
-                        paused = True
-                    else:
-                        scanned += result.get('scanned', 0)
-                        matched += result.get('matched', 0)
-                except Exception as e:
-                    print(f"[ERROR] 线程 {thread_id} 异常: {e}")
-
-        if paused:
-            return {'status': 'paused', 'scanned': scanned, 'matched': matched}
-
-        return {'status': 'completed', 'scanned': scanned, 'matched': matched}
-
-    def _split_files_for_threads(self, pdfs, num_threads=3):
-        """将PDF文件按范围分配给N个线程
-        均分策略：每10个文件为一组，按线程数均分
-        2线程: A(0-4), B(5-9)
-        3线程: A(0-3), B(4-6), C(7-9)
-        4线程: A(0-2), B(3-4), C(5-7), D(8-9)
+    def _scan_and_dispatch(self, dirname):
+        """扫描目录中的PDF文件，批量发送Celery任务
+        策略：和原来一样，不等扫描结束，凑够 阈值（线程数×3）就发
+        每个 PDF = 1 个独立 Celery 任务，由 16 个 prefork worker 并行消费
         """
-        # 生成线程ID列表
-        thread_ids = [chr(ord('A') + i) for i in range(num_threads)]
-        groups = {tid: [] for tid in thread_ids}
+        num_threads = int(SystemConfig.get('scan_threads', '10'))
+        num_threads = max(1, num_threads)
+        threshold = num_threads * 3
 
-        # 每10个文件为一组，计算每个线程分到的数量
-        files_per_cycle = 10
-        files_per_thread = files_per_cycle // num_threads
-        remainder = files_per_cycle % num_threads
-
-        for idx, pdf in enumerate(pdfs):
-            pos_in_cycle = idx % files_per_cycle
-
-            # 计算该位置属于哪个线程
-            assigned_thread = 0
-            boundary = 0
-            for t in range(num_threads):
-                # 前 remainder 个线程多分1个
-                chunk_size = files_per_thread + (1 if t < remainder else 0)
-                boundary += chunk_size
-                if pos_in_cycle < boundary:
-                    assigned_thread = t
-                    break
-
-            groups[thread_ids[assigned_thread]].append(pdf)
-
-        return groups
-
-    def _thread_worker(self, dirname, files, thread_id):
-        """线程工作函数"""
-        scanned = 0
-        matched = 0
-
-        for pdf in files:
-            # 检查暂停状态
-            current = ScanProgress.get()
-            if current['status'] == 'paused':
-                with self._progress_lock:
-                    ScanProgress.update(
-                        current_dir=dirname,
-                        current_file=pdf['path'],
-                        scanned_files=scanned,
-                        matched_files=matched,
-                    )
-                return {'status': 'paused', 'scanned': scanned, 'matched': matched}
-
-            try:
-                # 更新当前文件（全局）
-                self._current_file = pdf['path']
-                result = self._process_single_pdf_thread_safe(pdf, dirname, thread_id)
-                scanned += 1
-                if result:
-                    matched += 1
-            except Exception as e:
-                print(f"[ERROR] 线程 {thread_id} 处理 {pdf['path']}: {e}")
-                scanned += 1
-
-            # 更新进度
-            with self._progress_lock:
-                ScanProgress.update(
-                    current_dir=dirname,
-                    current_file=self._current_file,
-                    scanned_files=scanned,
-                    matched_files=matched,
-                )
-
-        return {'status': 'completed', 'scanned': scanned, 'matched': matched}
-
-    def _process_single_pdf_thread_safe(self, pdf, dirname, thread_id):
-        """线程安全的单PDF处理
-        返回 True 表示匹配（是说明），False 表示不匹配
-        """
-        file_path = self.smb.get_file_path(pdf['path'])
-
-        # 步骤1: 提取设计编号（每个线程独立）
-        try:
-            info = self.extractor.extract_with_ocr_fallback(file_path, self.ocr)
-            design_number = info['设计编号']
-        except Exception as e:
-            print(f"[线程 {thread_id}] 提取设计编号失败 {pdf['path']}: {e}")
-            design_number = 'unknown'
-            info = {}
-
-        # 保存到临时库
-        try:
-            temp_file = TempFile.get_by_path(pdf['path'])
-            if not temp_file:
-                temp_file = TempFile.create(
-                    file_path=pdf['path'],
-                    directory=dirname,
-                    filename=pdf['name'],
-                    file_size=pdf['size'],
-                    建设单位=info.get('建设单位'),
-                    工程名称=info.get('工程名称'),
-                    设计编号=design_number,
-                    图名=info.get('图名'),
-                    图号=info.get('图号'),
-                    图别=info.get('图别'),
-                    status='pending',
-                )
-        except Exception as e:
-            print(f"[线程 {thread_id}] 保存临时文件失败 {pdf['path']}: {e}")
-
-        temp_id = temp_file['id'] if temp_file else None
-
-        # 步骤2: qwen-3 裁图判断是否为说明（每个线程独立）
-        from app.vision.utils import pdf_page_to_image, crop_image_region, get_crop_strategy
-        image_path = pdf_page_to_image(file_path, page=1, dpi=200)
-        strategies = get_crop_strategy(image_path)
-
-        is_instruction = False
-        for region in strategies:
-            crop_path = crop_image_region(image_path, region=region)
-            is_instruction, confidence = self.classifier.classify(crop_path)
-            if is_instruction:
-                break
-
-        # 更新临时库状态
-        if temp_id:
-            if is_instruction:
-                TempFile.update(temp_id, is_instruction=True, status='instruction')
-            else:
-                TempFile.update(temp_id, is_instruction=False, status='not_instruction')
-                TempFile.update(temp_id, status='completed')
-                return False
-
-        # 是说明，检查设计编号是否已被标记（内存缓存，线程安全）
-        cache_hit = design_cache_memory.should_skip(design_number)
-
-        if cache_hit:
-            # 已标记，直接入正式库（不再 OCR 找【】，但要做 OCR 生成 MD）
-            print(f"[线程 {thread_id}] 设计编号 {design_number} 已标记，直接OCR生成MD")
-            try:
-                task_id, md_content = self.ocr.process_file(file_path)
-                self._save_to_formal(pdf, dirname, info, md_content, is_instruction=True, ocr_task_id=task_id)
-                if temp_id:
-                    TempFile.update(temp_id, status='completed')
-                return True
-            except Exception as e:
-                print(f"[线程 {thread_id}] OCR生成MD失败 {pdf['path']}: {e}")
-                if temp_id:
-                    TempFile.update(temp_id, status='completed')
-                return True
-
-        # 未标记，需要 OCR 找【】（第一个文件）
-        print(f"[线程 {thread_id}] 设计编号 {design_number} 首次出现，OCR找【】")
-        result = self.ocr.process_and_check(file_path)
-
-        if result['has_brackets']:
-            # 找到【】，标记设计编号（线程安全）
-            design_cache_memory.mark(design_number)
-            print(f"[线程 {thread_id}] 找到【】，标记设计编号 {design_number}")
-
-            self._save_to_formal(
-                pdf, dirname, info,
-                result['md_content'],
-                is_instruction=True,
-                ocr_task_id=result['task_id'],
-            )
-            if temp_id:
-                TempFile.update(temp_id, status='completed')
-            return True
-
-        # 没找到【】，留在临时库
-        if temp_id:
-            TempFile.update(temp_id, status='completed')
-        return False
-
-    def _save_to_formal(self, pdf, dirname, info, md_content, is_instruction=False, ocr_task_id=None):
-        """保存到正式库"""
-        import json
-        ScannedFile.create(
-            file_path=pdf['path'],
-            directory=dirname,
-            filename=pdf['name'],
-            file_size=pdf['size'],
-            建设单位=info.get('建设单位'),
-            工程名称=info.get('工程名称'),
-            设计编号=info.get('设计编号'),
-            图名=info.get('图名'),
-            图号=info.get('图号'),
-            图别=info.get('图别'),
-            json_result=json.dumps(info),
-            is_instruction=is_instruction,
-            has_brackets=True,
-            ocr_status='done',
-            ocr_task_id=ocr_task_id,
-            md_content=md_content,
-            scanned_at='NOW()',
-        )
-
-    def _list_pdfs_incremental(self, dirname, max_depth=256, max_files=1000):
-        """增量式获取PDF文件，边遍历边更新进度"""
-        import os
         mount_path = self.smb._find_mount_path_for_dir(dirname)
         if not mount_path:
-            return []
-        dir_path = os.path.join(mount_path, dirname)
+            return {'status': 'no_pdfs', 'scanned': 0, 'matched': 0, 'total_files': 0}
 
+        dir_path = os.path.join(mount_path, dirname)
         real_dir = os.path.realpath(dir_path)
         real_mount = os.path.realpath(mount_path)
-        if not real_dir.startswith(real_mount):
-            raise ValueError("Invalid directory path")
 
-        pdfs = []
-        base_depth = real_dir.rstrip(os.sep).count(os.sep)
+        if not real_dir.startswith(real_mount):
+            return {'status': 'no_pdfs', 'scanned': 0, 'matched': 0, 'total_files': 0}
+
+        # 先重置本目录的进度计数器
+        ScanProgress.update(scanned_files=0, matched_files=0)
+
+        from app.tasks import process_pdf_task
+
+        batch = []
+        count = 0
+        dispatched = 0
+        results = []
 
         for root, dirs, files in os.walk(real_dir):
+            cur = ScanProgress.get()
+            if cur['status'] in ('idle', 'paused'):
+                print(f"[INFO] 目录 {dirname} 扫描中断，状态={cur['status']}")
+                # 撤销已派发的任务
+                self._wait_for_tasks(results, dirname)
+                return {'status': 'paused', 'scanned': 0, 'matched': 0, 'total_files': count}
+
+            base_depth = real_dir.rstrip(os.sep).count(os.sep)
             current_depth = root.rstrip(os.sep).count(os.sep)
-            if current_depth - base_depth >= max_depth:
+            if current_depth - base_depth >= 256:
                 del dirs[:]
                 continue
 
@@ -384,24 +208,90 @@ class Scanner:
                         size = os.path.getsize(full)
                     except OSError:
                         size = 0
-                    pdfs.append({
+
+                    batch.append({
                         'name': name,
                         'size': size,
                         'path': rel_path,
                     })
+                    count += 1
 
-                    # 每找到50个PDF更新一次进度
-                    if len(pdfs) % 50 == 0:
+                    # 凑够阈值 → 批量发送
+                    if len(batch) >= threshold:
+                        dispatched += self._dispatch_batch(batch, dirname, process_pdf_task, results)
+                        batch = []
+
+                    # 更新发现进度
+                    if count % 50 == 0:
                         ScanProgress.update(
                             current_dir=dirname,
-                            current_file=f'已发现 {len(pdfs)} 个PDF...',
+                            current_file=f'已发现 {count} 个PDF...',
+                            total_files=count,
                         )
 
-                    if len(pdfs) >= max_files:
-                        print(f"[WARN] 项目 {dirname} PDF数量超过{max_files}，截断")
-                        return pdfs
+        # 发送剩余的
+        if batch:
+            dispatched += self._dispatch_batch(batch, dirname, process_pdf_task, results)
 
-        return pdfs
+        ScanProgress.update(total_files=count)
+        print(f"[INFO] 项目 {dirname} 共发现 {count} 个PDF，已派发 {dispatched} 个Celery任务")
+
+        if count == 0:
+            return {'status': 'no_pdfs', 'scanned': 0, 'matched': 0, 'total_files': 0}
+
+        # 等待所有任务完成
+        self._wait_for_tasks(results, dirname)
+
+        # 从DB读取最终计数
+        progress = ScanProgress.get()
+        final_scanned = progress.get('scanned_files', 0)
+        final_matched = progress.get('matched_files', 0)
+
+        print(f"[INFO] 项目 {dirname} 完成: 发现={count}, 扫描={final_scanned}, 匹配={final_matched}")
+        return {'status': 'completed', 'scanned': final_scanned, 'matched': final_matched, 'total_files': count}
+
+    def _dispatch_batch(self, batch, dirname, task_func, results):
+        """批量发送Celery任务到Redis队列"""
+        for pdf in batch:
+            r = task_func.delay(pdf, dirname)
+            results.append(r.id)
+        return len(batch)
+
+    def _wait_for_tasks(self, task_ids, dirname):
+        """通过DB计数器轮询等待所有Celery任务完成
+        不逐个检查AsyncResult（上万任务太慢），而是看DB的scanned_files是否追平total_files
+        """
+        import time
+
+        total = len(task_ids)
+        if total == 0:
+            return
+
+        print(f"[INFO] 等待 {total} 个任务完成...")
+
+        while True:
+            cur = ScanProgress.get()
+            if cur['status'] == 'idle':
+                print(f"[INFO] 检测到重置，撤销剩余任务")
+                from app import celery
+                for tid in task_ids:
+                    celery.control.revoke(tid, terminate=True)
+                return
+
+            scanned = cur.get('scanned_files', 0) or 0
+            matched = cur.get('matched_files', 0) or 0
+            total_files = cur.get('total_files', 0) or 0
+
+            ScanProgress.update(current_file=f'{dirname} 进度 {scanned}/{total_files}')
+
+            # 检查是否所有文件都处理完了
+            if total_files > 0 and scanned >= total_files:
+                print(f"[INFO] 所有任务完成: scanned={scanned}, matched={matched}")
+                break
+
+            # 超时保护：最多等待 2 小时
+            # 通过检查DB更新时间判断是否还有活动
+            time.sleep(2)
 
     def _get_exclude_dirs(self):
         """读取排除目录配置，逗号分隔"""
@@ -410,8 +300,32 @@ class Scanner:
             return set()
         return set(d.strip() for d in exclude_str.split(',') if d.strip())
 
+    def _get_selected_dirs(self):
+        """读取选中的目录列表，返回 None 表示全部"""
+        import json
+        selected_json = SystemConfig.get('scan_selected_dirs', '')
+        if not selected_json:
+            return None
+        try:
+            dirs = json.loads(selected_json)
+            return dirs if dirs else None
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    def _get_year_filter(self):
+        """读取年份筛选配置，返回 None 或整数年份"""
+        year_str = SystemConfig.get('scan_year_filter', '')
+        if not year_str:
+            return None
+        try:
+            year = int(year_str)
+            return year if year >= 2000 else None
+        except (ValueError, TypeError):
+            return None
+
     def mark_project_completed(self, directory):
         """标记项目完成并清理临时文件"""
+        from app.vision.models import ScannedDirectory
         # 1. 标记项目完成
         ScannedDirectory.mark_completed(directory)
 

@@ -84,6 +84,10 @@ class TempFile:
         execute(f"UPDATE {cls.TABLE} SET {fields}, updated_at = CURRENT_TIMESTAMP WHERE id = %s", values)
 
     @classmethod
+    def delete(cls, file_id):
+        execute(f"DELETE FROM {cls.TABLE} WHERE id = %s", (file_id,))
+
+    @classmethod
     def list(cls, design_number=None, status=None, page=1, size=20):
         where = []
         params = []

@@ -3,34 +3,154 @@
 {% block title %}操作日志 - PDF 扫描器{% endblock %}
 
 {% block content %}
-<h3>操作日志</h3>
-<table class="table table-striped">
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3 class="mb-0"><i class="bi bi-journal-text me-2"></i>操作日志</h3>
+    <small class="text-muted" id="log-count"></small>
+</div>
+<table class="table table-sm table-hover">
     <thead>
-        <tr><th>时间</th><th>用户</th><th>操作</th><th>详情</th></tr>
+        <tr>
+            <th style="width:180px">时间</th>
+            <th style="width:80px">用户</th>
+            <th style="width:120px">操作</th>
+            <th>详情</th>
+        </tr>
     </thead>
-    <tbody id="log-list"></tbody>
+    <tbody id="log-list">
+        <tr><td colspan="4" class="text-center text-muted p-3">加载中...</td></tr>
+    </tbody>
 </table>
+<div class="d-flex justify-content-center mt-3">
+    <button class="btn btn-outline-primary btn-sm" id="btn-load-more" onclick="loadMore()" style="display:none">
+        加载更多
+    </button>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-fetch('/api/logs')
-    .then(r => r.json())
-    .then(data => {
-        document.getElementById('log-list').innerHTML = data.logs.map(l => `
-            <tr>
-                <td>${new Date(l.created_at).toLocaleString()}</td>
-                <td>${escapeHtml(l.username)}</td>
-                <td>${escapeHtml(l.action)}</td>
-                <td><pre class="mb-0">${escapeHtml(JSON.stringify(l.detail, null, 2))}</pre></td>
-            </tr>
-        `).join('');
-    });
+let currentPage = 1;
+const pageSize = 50;
+
+const actionMap = {
+    'start_scan': {text: '开始扫描', cls: 'bg-success'},
+    'pause_scan': {text: '暂停扫描', cls: 'bg-warning'},
+    'resume_scan': {text: '恢复扫描', cls: 'bg-info'},
+    'reset_scan': {text: '重置扫描', cls: 'bg-danger'},
+    'update_config': {text: '更新配置', cls: 'bg-secondary'},
+    'update_smb_shares': {text: '更新SMB路径', cls: 'bg-secondary'},
+    'file_select': {text: '选择文件', cls: 'bg-primary'},
+    'file_deselect': {text: '取消选择', cls: 'bg-secondary'},
+};
 
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
 }
+
+function appendLogRow(tbody, l) {
+    const action = actionMap[l.action] || {text: l.action, cls: 'bg-secondary'};
+    const detailStr = l.detail ? JSON.stringify(l.detail, null, 2) : '';
+    const escapedDetail = escapeHtml(detailStr);
+
+    const tr = document.createElement('tr');
+
+    const tdTime = document.createElement('td');
+    tdTime.className = 'text-muted small';
+    tdTime.textContent = l.created_at || '-';
+
+    const tdUser = document.createElement('td');
+    tdUser.textContent = l.username || '-';
+
+    const tdAction = document.createElement('td');
+    const badge = document.createElement('span');
+    badge.className = 'badge ' + action.cls;
+    badge.textContent = action.text;
+    tdAction.appendChild(badge);
+
+    const tdDetail = document.createElement('td');
+    if (!l.detail) {
+        const span = document.createElement('span');
+        span.className = 'text-muted';
+        span.textContent = '-';
+        tdDetail.appendChild(span);
+    } else if (detailStr.length > 80) {
+        const a = document.createElement('a');
+        a.href = 'javascript:void(0)';
+        a.className = 'small text-decoration-none';
+        a.textContent = '展开';
+        a.onclick = function() {
+            const pre = this.nextElementSibling;
+            if (pre.style.display === 'none') {
+                pre.style.display = 'block';
+                a.textContent = '收起';
+            } else {
+                pre.style.display = 'none';
+                a.textContent = '展开';
+            }
+        };
+        tdDetail.appendChild(a);
+
+        const wrap = document.createElement('div');
+        wrap.className = 'small text-muted';
+        wrap.style.cssText = 'display:none;max-height:300px;overflow:auto';
+        const pre = document.createElement('pre');
+        pre.className = 'mb-0 mt-1';
+        pre.style.cssText = 'white-space:pre-wrap;font-size:12px';
+        pre.textContent = detailStr;
+        wrap.appendChild(pre);
+        tdDetail.appendChild(wrap);
+    } else {
+        const span = document.createElement('span');
+        span.className = 'small text-muted';
+        span.textContent = detailStr;
+        tdDetail.appendChild(span);
+    }
+
+    tr.appendChild(tdTime);
+    tr.appendChild(tdUser);
+    tr.appendChild(tdAction);
+    tr.appendChild(tdDetail);
+    tbody.appendChild(tr);
+}
+
+function loadLogs(page) {
+    fetch('/api/logs?page=' + page + '&size=' + pageSize)
+        .then(r => r.json())
+        .then(data => {
+            const tbody = document.getElementById('log-list');
+            if (!data.logs || data.logs.length === 0) {
+                if (page === 1) {
+                    tbody.textContent = '';
+                    const tr = document.createElement('tr');
+                    const td = document.createElement('td');
+                    td.colSpan = 4;
+                    td.className = 'text-center text-muted p-3';
+                    td.textContent = '暂无日志';
+                    tr.appendChild(td);
+                    tbody.appendChild(tr);
+                }
+                document.getElementById('btn-load-more').style.display = 'none';
+                return;
+            }
+
+            document.getElementById('log-count').textContent = '第 ' + page + ' 页，每页 ' + pageSize + ' 条';
+
+            if (page === 1) {
+                tbody.textContent = '';
+            }
+            data.logs.forEach(l => appendLogRow(tbody, l));
+
+            document.getElementById('btn-load-more').style.display = data.logs.length < pageSize ? 'none' : 'inline-block';
+        });
+}
+
+function loadMore() {
+    currentPage++;
+    loadLogs(currentPage);
+}
+
+loadLogs(1);
 </script>
 {% endblock %}

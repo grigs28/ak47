@@ -16,6 +16,11 @@
             <i class="bi bi-play-circle me-1"></i>开始扫描
         </button>
     </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="log-tab" data-bs-toggle="tab" data-bs-target="#logs" type="button" role="tab">
+            <i class="bi bi-journal-text me-1"></i>操作日志
+        </button>
+    </li>
 </ul>
 
 <div class="tab-content" id="scanTabContent">
@@ -66,8 +71,9 @@
                             <input type="number" class="form-control form-control-sm" id="scan-concurrency" placeholder="1" min="1" max="10">
                         </div>
                         <div class="mb-0">
-                            <label class="form-label small fw-semibold">标准名称</label>
-                            <input type="text" class="form-control form-control-sm" id="gbt-standard" placeholder="GBT 50378-2019(2024年版)">
+                            <label class="form-label small fw-semibold">标准名称关键词</label>
+                            <input type="text" class="form-control form-control-sm" id="gbt-standard" placeholder="gb,50378,2019,2024">
+                            <div class="form-text">逗号分隔，全部匹配才算说明，不分大小写</div>
                         </div>
                         <div class="mb-0 mt-3">
                             <label class="form-label small fw-semibold">排除目录（逗号分隔）</label>
@@ -93,11 +99,16 @@
                     <div class="card-body p-0 d-flex flex-column">
                         <div id="smb-dirs-section" class="d-none flex-grow-1 d-flex flex-column">
                             <div class="px-3 pt-3 pb-2 d-flex justify-content-between align-items-center">
-                                <h6 class="mb-0">按最新修改排序<small class="text-muted" id="smb-dirs-count"></small></h6>
+                                <h6 class="mb-0">按最新修改排序<small class="text-muted" id="smb-dirs-count"></small> <small class="text-primary" id="smb-selected-count"></small></h6>
+                                <div class="d-flex align-items-center gap-2">
+                                    <label class="form-label small mb-0 text-nowrap">年份筛选</label>
+                                    <input type="number" class="form-control form-control-sm" id="dir-year-filter" placeholder="如：2020" min="2000" max="2099" style="width:100px" onchange="applyYearFilter()">
+                                    <small class="text-muted">早于此年跳过</small>
+                                </div>
                             </div>
                             <div class="table-responsive flex-grow-1" style="overflow-y: auto;">
                                 <table class="table table-sm table-striped mb-0">
-                                    <thead style="position: sticky; top: 0; background: white; z-index: 1;"><tr><th>目录名</th><th>修改时间</th><th>状态</th></tr></thead>
+                                    <thead style="position: sticky; top: 0; background: white; z-index: 1;"><tr><th style="width:30px"><input type="checkbox" class="form-check-input" id="select-all-dirs" checked onchange="toggleAllDirs(this.checked)"></th><th>目录名</th><th>修改时间</th><th>状态</th></tr></thead>
                                     <tbody id="smb-dirs"></tbody>
                                 </table>
                             </div>
@@ -161,28 +172,40 @@
                     </div>
                     <div class="card-body">
                         <div class="row g-2">
-                            <div class="col-6">
+                            <div class="col-4">
                                 <div class="border rounded p-2 text-center">
                                     <div class="text-muted small">总目录</div>
                                     <div class="fs-4 fw-bold" id="total-dirs">-</div>
                                 </div>
                             </div>
-                            <div class="col-6">
-                                <div class="border rounded p-2 text-center">
-                                    <div class="text-muted small">总文件</div>
-                                    <div class="fs-4 fw-bold" id="total-files">-</div>
-                                </div>
-                            </div>
-                            <div class="col-6">
+                            <div class="col-4">
                                 <div class="border rounded p-2 text-center">
                                     <div class="text-muted small">已扫描</div>
                                     <div class="fs-4 fw-bold text-primary" id="scanned-files">-</div>
                                 </div>
                             </div>
-                            <div class="col-6">
+                            <div class="col-4">
                                 <div class="border rounded p-2 text-center">
                                     <div class="text-muted small">已匹配</div>
                                     <div class="fs-4 fw-bold text-success" id="matched-files">-</div>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="border rounded p-2 text-center">
+                                    <div class="text-muted small">跳过目录</div>
+                                    <div class="fs-4 fw-bold text-warning" id="skipped-dirs">-</div>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="border rounded p-2 text-center">
+                                    <div class="text-muted small">总文件</div>
+                                    <div class="fs-4 fw-bold" id="total-files">-</div>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="border rounded p-2 text-center">
+                                    <div class="text-muted small">状态</div>
+                                    <div id="scan-stat-status">-</div>
                                 </div>
                             </div>
                         </div>
@@ -205,6 +228,31 @@
             </div>
         </div>
     </div>
+
+    <!-- 操作日志 -->
+    <div class="tab-pane fade" id="logs" role="tabpanel">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-journal-text me-2"></i>操作日志</span>
+                <small class="text-muted" id="log-count"></small>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-sm table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th style="width:180px">时间</th>
+                            <th style="width:80px">用户</th>
+                            <th style="width:120px">操作</th>
+                            <th>详情</th>
+                        </tr>
+                    </thead>
+                    <tbody id="log-tbody">
+                        <tr><td colspan="4" class="text-center text-muted p-3">加载中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
@@ -221,6 +269,7 @@ function updateStatus() {
             document.getElementById('total-files').textContent = data.total_files || 0;
             document.getElementById('scanned-files').textContent = data.scanned_files || 0;
             document.getElementById('matched-files').textContent = data.matched_files || 0;
+            document.getElementById('skipped-dirs').textContent = data.skipped_dirs || 0;
 
             const total = data.total_files || 0;
             const scanned = data.scanned_files || 0;
@@ -254,6 +303,9 @@ function updateStatus() {
                 'completed': '<span class="badge bg-info">已完成</span>',
             };
             document.getElementById('scan-status-text').innerHTML = '状态：' + (statusMap[data.status] || '<span class="badge bg-secondary">' + (data.status || 'idle') + '</span>');
+            // 统计卡片内的状态徽章
+            const statStatusEl = document.getElementById('scan-stat-status');
+            if (statStatusEl) statStatusEl.innerHTML = statusMap[data.status] || '<span class="badge bg-secondary">' + (data.status || 'idle') + '</span>';
             document.getElementById('current-design').textContent = data.current_design_number || '-';
 
             // 显示开始时间和已扫描时长
@@ -384,6 +436,60 @@ function testSMB(forceRefresh) {
 
 let currentPage = 1;
 let totalPages = 1;
+let selectedDirs = new Set();  // 选中的目录名集合
+let allDirNames = [];  // 当前页所有目录名
+let selectedDirsInited = false;  // 是否已从 localStorage 初始化
+
+function _saveSelectedToStorage() {
+    localStorage.setItem('ak47_selected_dirs', JSON.stringify(Array.from(selectedDirs)));
+}
+
+function _loadSelectedFromStorage() {
+    try {
+        const saved = localStorage.getItem('ak47_selected_dirs');
+        if (saved) {
+            const arr = JSON.parse(saved);
+            if (Array.isArray(arr) && arr.length > 0) {
+                selectedDirs = new Set(arr);
+                selectedDirsInited = true;
+            }
+        }
+    } catch(e) {}
+}
+
+function toggleAllDirs(checked) {
+    const checkboxes = document.querySelectorAll('.dir-checkbox');
+    checkboxes.forEach(cb => {
+        cb.checked = checked;
+        const name = cb.dataset.name;
+        if (checked) {
+            selectedDirs.add(name);
+        } else {
+            selectedDirs.delete(name);
+        }
+    });
+    updateSelectedCount();
+    _saveSelectedToStorage();
+}
+
+function toggleDir(name, checked) {
+    if (checked) {
+        selectedDirs.add(name);
+    } else {
+        selectedDirs.delete(name);
+    }
+    // 更新全选框状态
+    const allChecked = document.querySelectorAll('.dir-checkbox').length > 0 &&
+        document.querySelectorAll('.dir-checkbox:checked').length === document.querySelectorAll('.dir-checkbox').length;
+    document.getElementById('select-all-dirs').checked = allChecked;
+    updateSelectedCount();
+    _saveSelectedToStorage();
+}
+
+function updateSelectedCount() {
+    const countEl = document.getElementById('smb-selected-count');
+    if (countEl) countEl.textContent = '已选 ' + selectedDirs.size + ' 个';
+}
 
 function loadSMBDirs(page) {
     if (!page || page < 1) page = 1;
@@ -394,6 +500,16 @@ function loadSMBDirs(page) {
         .then(data => {
             const tbody = document.getElementById('smb-dirs');
             if (data.items) {
+                allDirNames = data.items.map(d => d.name);
+                // 从 localStorage 恢复选择，没有则默认全选
+                if (!selectedDirsInited) {
+                    _loadSelectedFromStorage();
+                }
+                if (selectedDirs.size === 0) {
+                    data.items.forEach(d => selectedDirs.add(d.name));
+                    _saveSelectedToStorage();
+                }
+
                 tbody.innerHTML = data.items.map(d => {
                     const mtime = d.mtime ? new Date(d.mtime * 1000).toLocaleString() : '-';
                     let statusBadge = '';
@@ -404,11 +520,17 @@ function loadSMBDirs(page) {
                     } else {
                         statusBadge = '<span class="badge bg-secondary">待扫描</span>';
                     }
-                    return '<tr><td>' + escapeHtml(d.name) + '</td><td>' + mtime + '</td><td>' + statusBadge + '</td></tr>';
+                    const checked = selectedDirs.has(d.name) ? 'checked' : '';
+                    return '<tr><td><input type="checkbox" class="form-check-input dir-checkbox" data-name="' + escapeHtml(d.name) + '" ' + checked + ' onchange="toggleDir(\'' + escapeHtml(d.name).replace(/'/g, "\\'") + '\', this.checked)"></td><td>' + escapeHtml(d.name) + '</td><td>' + mtime + '</td><td>' + statusBadge + '</td></tr>';
                 }).join('');
                 document.getElementById('smb-dirs-section').classList.remove('d-none');
                 document.getElementById('smb-not-mounted').classList.add('d-none');
                 document.getElementById('smb-dirs-count').textContent = ' 共 ' + (data.total || 0) + ' 个';
+
+                // 更新全选框状态
+                const allChecked = data.items.length > 0 && data.items.every(d => selectedDirs.has(d.name));
+                document.getElementById('select-all-dirs').checked = allChecked;
+                updateSelectedCount();
 
                 totalPages = Math.ceil((data.total || 0) / 100);
                 document.getElementById('smb-page-info').textContent = '第 ' + page + ' / ' + totalPages + ' 页';
@@ -437,6 +559,7 @@ function loadSMBForm() {
             document.getElementById('scan-concurrency').value = configs['scan_concurrency'] || '1';
             document.getElementById('gbt-standard').value = configs['gbt_standard'] || '';
             document.getElementById('scan-exclude-dirs').value = configs['scan_exclude_dirs'] || '';
+            document.getElementById('dir-year-filter').value = configs['scan_year_filter'] || '';
         });
 
     // 加载共享路径列表
@@ -539,8 +662,8 @@ function umountSingle(index) {
 
 function saveSMBConfig() {
     // 保存通用配置
-    const keys = ['smb_server', 'smb_username', 'smb_password', 'smb_domain', 'scan_concurrency', 'gbt_standard', 'scan_exclude_dirs'];
-    const ids = ['smb-server', 'smb-username', 'smb-password', 'smb-domain', 'scan-concurrency', 'gbt-standard', 'scan-exclude-dirs'];
+    const keys = ['smb_server', 'smb_username', 'smb_password', 'smb_domain', 'scan_concurrency', 'gbt_standard', 'scan_exclude_dirs', 'scan_year_filter'];
+    const ids = ['smb-server', 'smb-username', 'smb-password', 'smb-domain', 'scan-concurrency', 'gbt-standard', 'scan-exclude-dirs', 'dir-year-filter'];
     const promises = keys.map((key, i) => {
         const value = document.getElementById(ids[i]).value;
         return fetch('/api/config/' + key, {
@@ -631,7 +754,42 @@ function escapeHtml(text) {
 }
 
 function startScan() {
-    fetch('/api/scan/start', {method: 'POST'}).then(() => updateStatus());
+    const selected = Array.from(selectedDirs);
+    const yearFilter = document.getElementById('dir-year-filter').value || '';
+    fetch('/api/scan/start', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({selected_dirs: selected, year_filter: parseInt(yearFilter) || null}),
+    }).then(() => updateStatus());
+}
+
+function applyYearFilter() {
+    const year = parseInt(document.getElementById('dir-year-filter').value) || 0;
+    const checkboxes = document.querySelectorAll('.dir-checkbox');
+    if (!year) {
+        // 无年份筛选，全部恢复可选（不清除已选状态）
+        checkboxes.forEach(cb => cb.closest('tr').style.opacity = '');
+        return;
+    }
+    checkboxes.forEach(cb => {
+        const tr = cb.closest('tr');
+        const mtimeText = tr.cells[2].textContent;
+        // 解析时间字符串中的年份
+        const match = mtimeText.match(/(\d{4})/);
+        if (match && parseInt(match[1]) < year) {
+            tr.style.opacity = '0.4';
+            cb.checked = false;
+            selectedDirs.delete(cb.dataset.name);
+        } else {
+            tr.style.opacity = '';
+        }
+    });
+    const allChecked = checkboxes.length > 0 &&
+        document.querySelectorAll('.dir-checkbox:checked').length === document.querySelectorAll('.dir-checkbox:not([style*="opacity: 0.4"])').length &&
+        document.querySelectorAll('.dir-checkbox:not([style*="opacity: 0.4"])').length > 0;
+    document.getElementById('select-all-dirs').checked = allChecked;
+    updateSelectedCount();
+    _saveSelectedToStorage();
 }
 
 function pauseScan() {
@@ -643,8 +801,13 @@ function resumeScan() {
 }
 
 function resetScan() {
-    if (!confirm('确定重置扫描进度？')) return;
-    fetch('/api/scan/reset', {method: 'POST'}).then(() => updateStatus());
+    if (!confirm('确定重置？将清空本次扫描的所有数据（队列、文件记录、进度），不可恢复！')) return;
+    fetch('/api/scan/reset', {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+            alert(data.message || '已重置');
+            updateStatus();
+        });
 }
 
 function showNotification(msg, type) {
@@ -666,6 +829,66 @@ document.getElementById('smb-tab').addEventListener('shown.bs.tab', function() {
     checkSMBStatus();
 });
 document.getElementById('control-tab').addEventListener('shown.bs.tab', updateStatus);
+document.getElementById('log-tab').addEventListener('shown.bs.tab', loadLogs);
+
+// === 操作日志 ===
+let logInterval = null;
+
+function loadLogs() {
+    fetch('/api/logs?size=50')
+        .then(r => r.json())
+        .then(data => {
+            const tbody = document.getElementById('log-tbody');
+            if (!data.logs || data.logs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted p-3">暂无日志</td></tr>';
+                document.getElementById('log-count').textContent = '';
+                return;
+            }
+            document.getElementById('log-count').textContent = '最近 ' + data.logs.length + ' 条';
+            tbody.innerHTML = data.logs.map(l => {
+                const actionMap = {
+                    'start_scan': '开始扫描',
+                    'pause_scan': '暂停扫描',
+                    'resume_scan': '恢复扫描',
+                    'reset_scan': '重置扫描',
+                    'update_config': '更新配置',
+                    'update_smb_shares': '更新SMB路径',
+                    'file_select': '选择文件',
+                    'file_deselect': '取消选择',
+                };
+                const actionText = actionMap[l.action] || l.action;
+                const detailStr = l.detail ? JSON.stringify(l.detail, null, 2) : '';
+                const escapedDetail = detailStr.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                return `<tr>
+                    <td class="text-muted small">${l.created_at || '-'}</td>
+                    <td>${l.username || '-'}</td>
+                    <td><span class="badge bg-secondary">${actionText}</span></td>
+                    <td>${detailStr ? '<a href="javascript:void(0)" class="small text-decoration-none" onclick="toggleLogDetail(this)">展开</a><pre class="d-none mb-0 mt-1 small text-muted" style="max-height:200px;overflow:auto;white-space:pre-wrap;font-size:12px">' + escapedDetail + '</pre>' : '-'}</td>
+                </tr>`;
+            }).join('');
+        });
+}
+
+function toggleLogDetail(el) {
+    const pre = el.nextElementSibling;
+    if (pre.classList.contains('d-none')) {
+        pre.classList.remove('d-none');
+        el.textContent = '收起';
+    } else {
+        pre.classList.add('d-none');
+        el.textContent = '展开';
+    }
+}
+
+// 日志 tab 激活时启动自动刷新，离开时停止
+document.getElementById('log-tab').addEventListener('shown.bs.tab', function() {
+    loadLogs();
+    if (logInterval) clearInterval(logInterval);
+    logInterval = setInterval(loadLogs, 5000);
+});
+document.getElementById('log-tab').addEventListener('hidden.bs.tab', function() {
+    if (logInterval) { clearInterval(logInterval); logInterval = null; }
+});
 
 // 初始加载
 loadSMBForm();

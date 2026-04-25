@@ -53,6 +53,7 @@ def callback():
     session['username'] = username
     session['display_name'] = data.get('display_name', username)
     session['is_admin'] = is_admin
+    session.permanent = True
 
     return redirect(url_for('views.dashboard'))
 

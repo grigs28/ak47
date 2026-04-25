@@ -5,20 +5,19 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+    image: docker-web:latest
     ports:
       - "5556:5556"
     environment:
       - FLASK_ENV=production
+      - SECRET_KEY=ak47-secret-change-me
       - REDIS_URL=redis://redis:6379/0
       - DB_HOST=192.168.0.98
       - DB_PORT=5432
-      - DB_NAME=yz_relay
+      - DB_NAME=ak47
       - DB_USER=grigs
-      - DB_PASSWORD=${DB_PASSWORD}
-      - SMB_SERVER=192.168.0.79
-      - SMB_SHARE=abb/FS/10/D$/tbmdata/data/ftpdata
-      - SMB_USER=${SMB_USER}
-      - SMB_PASS=${SMB_PASS}
+      - DB_PASSWORD=Slnwg123$
+      - ADMIN_USERS=grigs
     cap_add:
       - SYS_ADMIN
       - DAC_READ_SEARCH
@@ -29,23 +28,23 @@ services:
     depends_on:
       - redis
     command: web
+    restart: unless-stopped
 
   worker:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+    image: docker-worker:latest
     environment:
       - FLASK_ENV=production
+      - SECRET_KEY=ak47-secret-change-me
       - REDIS_URL=redis://redis:6379/0
       - DB_HOST=192.168.0.98
       - DB_PORT=5432
-      - DB_NAME=yz_relay
+      - DB_NAME=ak47
       - DB_USER=grigs
-      - DB_PASSWORD=${DB_PASSWORD}
-      - SMB_SERVER=192.168.0.79
-      - SMB_SHARE=abb/FS/10/D$/tbmdata/data/ftpdata
-      - SMB_USER=${SMB_USER}
-      - SMB_PASS=${SMB_PASS}
+      - DB_PASSWORD=Slnwg123$
+      - ADMIN_USERS=grigs
     cap_add:
       - SYS_ADMIN
       - DAC_READ_SEARCH
@@ -56,8 +55,8 @@ services:
     depends_on:
       - redis
     command: worker
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    restart: unless-stopped

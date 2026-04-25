@@ -1,7 +1,10 @@
 import os
+from datetime import timedelta
 
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY', 'change-me-in-production')
+    PERMANENT_SESSION_LIFETIME = timedelta(days=7)
+    SESSION_COOKIE_NAME = 'ak47_session'
 
     DB_HOST = os.environ.get('DB_HOST', '192.168.0.98')
     DB_PORT = int(os.environ.get('DB_PORT', 5432))

@@ -6,7 +6,7 @@
 <div id="notification-area"></div>
 
 <div class="row mb-4">
-    <div class="col-md-3">
+    <div class="col">
         <div class="card stat-card bg-primary text-white">
             <div class="card-body">
                 <h5>总目录数</h5>
@@ -14,7 +14,15 @@
             </div>
         </div>
     </div>
-    <div class="col-md-3">
+    <div class="col">
+        <div class="card stat-card bg-warning text-dark">
+            <div class="card-body">
+                <h5>总文件数</h5>
+                <h2 id="total-files">-</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col">
         <div class="card stat-card bg-info text-white">
             <div class="card-body">
                 <h5>已扫描</h5>
@@ -22,7 +30,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-3">
+    <div class="col">
         <div class="card stat-card bg-success text-white">
             <div class="card-body">
                 <h5>匹配数</h5>
@@ -30,7 +38,15 @@
             </div>
         </div>
     </div>
-    <div class="col-md-3">
+    <div class="col">
+        <div class="card stat-card" style="background:#6f42c1;color:#fff">
+            <div class="card-body">
+                <h5>发现说明数</h5>
+                <h2 id="instruction-count">-</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col">
         <div class="card stat-card bg-dark text-white">
             <div class="card-body">
                 <h5>状态</h5>
@@ -41,7 +57,7 @@
 </div>
 
 <div class="row mb-4">
-    <div class="col-md-3">
+    <div class="col">
         <div class="card">
             <div class="card-body">
                 <h6 class="text-muted">开始时间</h6>
@@ -49,7 +65,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-3">
+    <div class="col">
         <div class="card">
             <div class="card-body">
                 <h6 class="text-muted">已用时间</h6>
@@ -57,7 +73,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-3">
+    <div class="col">
         <div class="card">
             <div class="card-body">
                 <h6 class="text-muted">每分钟文件数</h6>
@@ -65,7 +81,15 @@
             </div>
         </div>
     </div>
-    <div class="col-md-3">
+    <div class="col">
+        <div class="card">
+            <div class="card-body">
+                <h6 class="text-muted">当前目录</h6>
+                <p class="mb-0 fs-5" id="current-dir">-</p>
+            </div>
+        </div>
+    </div>
+    <div class="col">
         <div class="card">
             <div class="card-body">
                 <h6 class="text-muted">预计剩余</h6>
@@ -109,12 +133,14 @@
 {% block extra_js %}
 <script>
 let statusInterval;
+let lastNotifiedStatus = null;
 
 function updateStatus() {
     fetch('/api/scan/status')
         .then(r => r.json())
         .then(data => {
             document.getElementById('total-dirs').textContent = data.total_dirs || 0;
+            document.getElementById('total-files').textContent = data.total_files || 0;
             document.getElementById('scanned-files').textContent = data.scanned_files || 0;
             document.getElementById('matched-files').textContent = data.matched_files || 0;
 
@@ -161,6 +187,12 @@ function updateStatus() {
                 const speed = elapsed > 0 ? (scanned / elapsed * 60).toFixed(1) : 0;
                 document.getElementById('scan-speed').textContent = speed + ' 个/分';
 
+                // 发现说明数
+                document.getElementById('instruction-count').textContent = data.instruction_count || 0;
+
+                // 当前目录
+                document.getElementById('current-dir').textContent = data.current_dir || '-';
+
                 // 预计剩余时间
                 const remaining = total - scanned;
                 if (speed > 0 && remaining > 0) {
@@ -178,11 +210,17 @@ function updateStatus() {
                 document.getElementById('start-time').textContent = '-';
                 document.getElementById('elapsed-time').textContent = '-';
                 document.getElementById('scan-speed').textContent = '-';
+                document.getElementById('instruction-count').textContent = '-';
                 document.getElementById('scan-eta').textContent = '-';
             }
 
-            if (status === 'completed') {
+            if (status === 'completed' && lastNotifiedStatus !== 'completed') {
+                lastNotifiedStatus = 'completed';
                 showNotification('扫描完成！共发现 ' + data.matched_files + ' 个匹配文件', 'success');
+            } else if (status === 'running' || status === 'paused') {
+                lastNotifiedStatus = status;
+            } else if (status === 'idle') {
+                lastNotifiedStatus = 'idle';
             }
         });
 
@@ -220,8 +258,13 @@ function resumeScan() {
 }
 
 function resetScan() {
-    if (!confirm('确定重置扫描进度？')) return;
-    fetch('/api/scan/reset', {method: 'POST'}).then(() => updateStatus());
+    if (!confirm('确定重置？将清空本次扫描的所有数据（队列、文件记录、进度），不可恢复！')) return;
+    fetch('/api/scan/reset', {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+            alert(data.message || '已重置');
+            updateStatus();
+        });
 }
 
 function showNotification(msg, type) {

@@ -31,7 +31,7 @@ class ScanProgress:
     def reset(cls):
         execute(f"UPDATE {cls.TABLE} SET status = 'idle', current_dir = NULL, current_file = NULL, "
                 f"dir_index = 0, file_index = 0, total_dirs = 0, total_files = 0, "
-                f"scanned_files = 0, matched_files = 0, started_at = NULL, paused_at = NULL, "
+                f"scanned_files = 0, matched_files = 0, skipped_dirs = 0, started_at = NULL, paused_at = NULL, "
                 f"completed_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = 1")
 
 class ScannedFile:

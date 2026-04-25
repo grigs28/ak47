@@ -3,3 +3,9 @@ __pycache__/
 *.pyo
 dump.rdb
 tmp/
+*.log
+*.db
+.env
+.claude/
+docker/26.0.1
+docker/=4.18.0

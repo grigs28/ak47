@@ -25,6 +25,10 @@ def scan_start():
     if progress['status'] == 'running':
         return jsonify({'error': '扫描已在运行'}), 400
 
+    data = request.get_json() or {}
+    selected_dirs = data.get('selected_dirs', None)
+    year_filter = data.get('year_filter', None)
+
     # 自动启动 Celery Worker（如果未运行）
     import subprocess
     try:
@@ -44,6 +48,13 @@ def scan_start():
     except Exception:
         pass  # 启动失败不影响主流程
 
+    # 保存选中的目录列表到系统配置
+    if selected_dirs is not None:
+        import json
+        SystemConfig.set('scan_selected_dirs', json.dumps(selected_dirs, ensure_ascii=False))
+    if year_filter is not None:
+        SystemConfig.set('scan_year_filter', str(year_filter))
+
     ScanProgress.update(status='running')
     task = scan_task.delay()
 
@@ -51,7 +62,7 @@ def scan_start():
         user_id=session.get('user_id', 0),
         username=session.get('username', ''),
         action='start_scan',
-        detail={'task_id': task.id},
+        detail={'task_id': task.id, 'selected_dirs': selected_dirs},
     )
 
     return jsonify({'task_id': task.id, 'message': '扫描已启动'})
@@ -95,6 +106,37 @@ def scan_resume():
 @bp.route('/scan/reset', methods=['POST'])
 @admin_required
 def scan_reset():
+    # 1. 先重置进度为 idle（让正在跑的 Scanner 检测到后退出）
+    ScanProgress.reset()
+
+    # 2. 清空 Redis 队列 + 撤销所有正在执行的任务
+    try:
+        from app import celery
+        celery.control.purge()
+        # 撤销所有活跃任务（包括正在执行的）
+        i = celery.control.inspect()
+        active = i.active() or {}
+        for worker, tasks in active.items():
+            for t in tasks:
+                celery.control.revoke(t['id'], terminate=True)
+    except Exception:
+        pass
+
+    # 3. 等一下让 Scanner 退出
+    import time
+    time.sleep(1)
+
+    # 4. 清空所有数据表
+    try:
+        from app.db import execute
+        execute("TRUNCATE TABLE scanned_files")
+        execute("TRUNCATE TABLE temp_files")
+        execute("TRUNCATE TABLE design_cache")
+        execute("TRUNCATE TABLE scanned_directories")
+    except Exception:
+        pass
+
+    # 5. 再次确认进度归零（Scanner 可能写了新数据）
     ScanProgress.reset()
 
     OperationLog.create(
@@ -103,12 +145,17 @@ def scan_reset():
         action='reset_scan',
     )
 
-    return jsonify({'message': '扫描进度已重置'})
+    return jsonify({'message': '已重置：队列已清空，数据已清除，进度已归零'})
 
 @bp.route('/scan/status', methods=['GET'])
 @admin_required
 def scan_status():
     progress = ScanProgress.get()
+    # 发现说明数 = 临时库is_instruction + 正式库is_instruction
+    from app.db import query as db_query
+    temp_row = db_query("SELECT COUNT(*) as cnt FROM temp_files WHERE is_instruction = TRUE", fetchone=True)
+    formal_row = db_query("SELECT COUNT(*) as cnt FROM scanned_files WHERE is_instruction = TRUE", fetchone=True)
+    progress['instruction_count'] = (temp_row['cnt'] if temp_row else 0) + (formal_row['cnt'] if formal_row else 0)
     return jsonify(progress)
 
 # === 文件管理 ===

@@ -196,6 +196,9 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'scanned_files' AND column_name = 'is_instruction') THEN
         ALTER TABLE scanned_files ADD COLUMN is_instruction BOOLEAN DEFAULT NULL;
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'scan_progress' AND column_name = 'skipped_dirs') THEN
+        ALTER TABLE scan_progress ADD COLUMN skipped_dirs INTEGER DEFAULT 0;
+    END IF;
 END $$;
 
 CREATE INDEX IF NOT EXISTS idx_scanned_files_design_number ON scanned_files(设计编号);

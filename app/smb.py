@@ -49,13 +49,29 @@ class SMBManager:
             s['mounted'] = os.path.ismount(mount_path) if mount_path else False
         return shares
 
+    # 挂载基础目录：Docker容器用 /mnt/smb，本地用 ~/mnt/ak47
+    _mount_base = None
+
+    @classmethod
+    def _get_mount_base(cls):
+        if cls._mount_base:
+            return cls._mount_base
+        # 优先用环境变量
+        env_base = os.environ.get('AK47_MOUNT_BASE', '')
+        if env_base:
+            cls._mount_base = env_base
+        elif os.path.exists('/.dockerenv'):
+            cls._mount_base = '/mnt/smb'
+        else:
+            cls._mount_base = os.path.join(os.path.expanduser('~'), 'mnt', 'ak47')
+        return cls._mount_base
+
     @classmethod
     def _get_mount_path_for_share(cls, share):
         """根据 share 配置找到或生成挂载路径"""
         share_path = share.get('share', '')
         share_clean = share_path.lstrip('\\').replace('\\', '/')
-        home = os.path.expanduser('~')
-        ak47_base = os.path.join(home, 'mnt', 'ak47')
+        ak47_base = cls._get_mount_base()
 
         # 从 /proc/mounts 精确匹配挂载点
         try:
@@ -64,10 +80,9 @@ class SMBManager:
                     parts = line.split()
                     if len(parts) >= 2 and parts[2] == 'cifs':
                         mount_url = parts[0]  # 如 //192.168.0.79/abb/FS
-                        mount_dir = parts[1]   # 如 /home/grigs/mnt/ak47/xxx
+                        mount_dir = parts[1]   # 如 /mnt/smb/abb_FS
                         if not mount_dir.startswith(ak47_base):
                             continue
-                        # 精确匹配：mount_url 去掉 //server/ 后应该等于 share_clean
                         url_path = mount_url.split('/', 3)[-1] if '/' in mount_url[2:] else ''
                         if url_path == share_clean:
                             return mount_dir
@@ -110,14 +125,15 @@ class SMBManager:
         opts = f"vers=3.0,sec=ntlmssp,username={cfg['username']},password={cfg['password']},uid={os.getuid()},gid={os.getgid()},file_mode=0777,dir_mode=0777,ro"
         if cfg['domain']:
             opts += f",domain={cfg['domain']}"
-        cmd = [
-            'sudo', '-S', 'mount', '-t', 'cifs',
-            share_url,
-            mount_path,
-            '-o', opts
-        ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True, input='Slnwg123$\n')
+        # Docker 容器内直接 mount，本地用 sudo
+        if os.path.exists('/.dockerenv'):
+            cmd = ['mount', '-t', 'cifs', share_url, mount_path, '-o', opts]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+        else:
+            cmd = ['sudo', '-S', 'mount', '-t', 'cifs', share_url, mount_path, '-o', opts]
+            result = subprocess.run(cmd, capture_output=True, text=True, input='Slnwg123$\n')
+
         if result.returncode != 0:
             raise RuntimeError(f"SMB mount failed: {result.stderr}")
 
@@ -145,7 +161,10 @@ class SMBManager:
         for s in shares:
             mount_path = s.get('mount_path', '')
             if mount_path and os.path.ismount(mount_path):
-                subprocess.run(['sudo', '-S', 'umount', mount_path], capture_output=True, text=True, input='Slnwg123$\n')
+                if os.path.exists('/.dockerenv'):
+                    subprocess.run(['umount', mount_path], capture_output=True, text=True)
+                else:
+                    subprocess.run(['sudo', '-S', 'umount', mount_path], capture_output=True, text=True, input='Slnwg123$\n')
         cls._mount_points.clear()
 
     @classmethod
