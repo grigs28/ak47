@@ -8,6 +8,13 @@ from app.db import execute
 @celery.task(bind=True, max_retries=3)
 def scan_task(self):
     """后台扫描任务：遍历目录 + 派发PDF任务"""
+    # 自动挂载 SMB
+    from app.smb import SMBManager
+    try:
+        SMBManager.mount_all()
+    except Exception as e:
+        print(f"[WARN] SMB 挂载失败: {e}")
+
     scanner = Scanner()
 
     try:
@@ -198,9 +205,10 @@ def _increment_matched(dirname):
 
 
 def _check_standard_match(file_path):
-    """检查PDF内容是否匹配配置的标准名称关键词"""
+    """检查PDF内容是否匹配配置的标准名称关键词
+    流程：文本提取匹配 → 失败则 VL 视觉识别匹配
+    """
     try:
-        from app.vision import InfoExtractor
         standard = SystemConfig.get('gbt_standard', '')
         if not standard:
             return True
@@ -208,25 +216,69 @@ def _check_standard_match(file_path):
         if not keywords:
             return True
 
-        file_size = os.path.getsize(file_path)
-        extractor = InfoExtractor()
-
-        if file_size < extractor.VISION_SIZE_THRESHOLD:
-            import pdfplumber
-            with pdfplumber.open(file_path) as pdf:
-                if not pdf.pages:
-                    return False
-                text = pdf.pages[0].extract_text() or ''
-        else:
-            from app.vision import VisionOCRClient
-            ocr = VisionOCRClient()
-            task_id, md_content = ocr.process_file(file_path)
-            text = md_content or ''
+        # === 第1步：文本提取匹配 ===
+        import pdfplumber
+        text = ''
+        with pdfplumber.open(file_path) as pdf:
+            for page in pdf.pages[:3]:
+                text += (page.extract_text() or '')
 
         compact_lower = text.replace(' ', '').replace('\u3000', '').lower()
-        return all(kw in compact_lower for kw in keywords)
+        if all(kw in compact_lower for kw in keywords):
+            return True
+
+        # === 第2步：VL 视觉识别匹配（文本不够或匹配失败）===
+        return _vl_check_standard(file_path, keywords)
     except Exception:
         return False
+
+
+def _vl_check_standard(file_path, keywords):
+    """用 VL 视觉识别从图纸中找标准号，匹配关键词"""
+    import json, requests
+    from app.vision.utils import pdf_page_to_image, image_to_base64
+
+    base_url = SystemConfig.get('qwen_base_url', '')
+    api_key = SystemConfig.get('qwen_api_key', '')
+    model = SystemConfig.get('qwen_model', 'qwen-3')
+
+    prompt = '请列出这张图纸中引用的所有国家标准编号（如GB/T xxxxx-xxxx），用逗号分隔返回，不要其他内容。'
+
+    for page in [1, 2, 3]:
+        try:
+            img = pdf_page_to_image(file_path, page=page, dpi=200)
+        except Exception:
+            break
+        b64 = image_to_base64(img)
+
+        body = {
+            'model': model,
+            'messages': [{'role': 'user', 'content': [
+                {'type': 'text', 'text': prompt},
+                {'type': 'image_url', 'image_url': {'url': f'data:image/png;base64,{b64}'}},
+            ]}],
+            'temperature': 0.1,
+            'max_tokens': 200,
+        }
+        think_enabled = SystemConfig.get('vl_think', 'false') == 'true'
+        if not think_enabled:
+            body['chat_template_kwargs'] = {'enable_thinking': False}
+
+        try:
+            resp = requests.post(
+                f'{base_url}/chat/completions',
+                headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+                json=body, timeout=60,
+            )
+            resp.raise_for_status()
+            content = resp.json()['choices'][0]['message'].get('content', '')
+            compact = content.replace(' ', '').replace('\u3000', '').lower()
+            if all(kw in compact for kw in keywords):
+                return True
+        except Exception:
+            continue
+
+    return False
 
 
 def _save_to_formal(pdf, dirname, info, md_content, is_instruction=False, ocr_task_id=None):

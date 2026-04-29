@@ -134,6 +134,25 @@ class InfoExtractor:
     def _call_vision(self, image_path, prompt):
         """调用 qwen-3 vision API"""
         base64_image = image_to_base64(image_path)
+        think_enabled = SystemConfig.get('vl_think', 'false') == 'true'
+
+        body = {
+            'model': self.model,
+            'messages': [
+                {
+                    'role': 'user',
+                    'content': [
+                        {'type': 'text', 'text': prompt},
+                        {'type': 'image_url', 'image_url': {'url': f'data:image/png;base64,{base64_image}'}},
+                    ]
+                }
+            ],
+            'temperature': 0.1,
+            'max_tokens': 500,
+        }
+
+        if not think_enabled:
+            body['chat_template_kwargs'] = {'enable_thinking': False}
 
         resp = requests.post(
             f"{self.base_url}/chat/completions",
@@ -141,20 +160,7 @@ class InfoExtractor:
                 'Authorization': f'Bearer {self.api_key}',
                 'Content-Type': 'application/json',
             },
-            json={
-                'model': self.model,
-                'messages': [
-                    {
-                        'role': 'user',
-                        'content': [
-                            {'type': 'text', 'text': prompt},
-                            {'type': 'image_url', 'image_url': {'url': f'data:image/png;base64,{base64_image}'}},
-                        ]
-                    }
-                ],
-                'temperature': 0.1,
-                'max_tokens': 500,
-            },
+            json=body,
             timeout=60,
         )
         resp.raise_for_status()

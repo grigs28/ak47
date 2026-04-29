@@ -14,6 +14,7 @@ class InstructionClassifier:
     def classify(self, image_path, max_retries=2):
         """判断图片是否为说明文档，返回 (is_instruction, confidence)"""
         base64_image = image_to_base64(image_path)
+        think_enabled = SystemConfig.get('vl_think', 'false') == 'true'
 
         prompt = """请判断这张图片是否为"建筑设计说明"或"设计说明"类文档。
 
@@ -23,26 +24,31 @@ class InstructionClassifier:
 
         for attempt in range(max_retries + 1):
             try:
+                body = {
+                    'model': self.model,
+                    'messages': [
+                        {
+                            'role': 'user',
+                            'content': [
+                                {'type': 'text', 'text': prompt},
+                                {'type': 'image_url', 'image_url': {'url': f'data:image/png;base64,{base64_image}'}},
+                            ]
+                        }
+                    ],
+                    'temperature': 0.1,
+                    'max_tokens': 200,
+                }
+
+                if not think_enabled:
+                    body['chat_template_kwargs'] = {'enable_thinking': False}
+
                 resp = requests.post(
                     f"{self.base_url}/chat/completions",
                     headers={
                         'Authorization': f'Bearer {self.api_key}',
                         'Content-Type': 'application/json',
                     },
-                    json={
-                        'model': self.model,
-                        'messages': [
-                            {
-                                'role': 'user',
-                                'content': [
-                                    {'type': 'text', 'text': prompt},
-                                    {'type': 'image_url', 'image_url': {'url': f'data:image/png;base64,{base64_image}'}},
-                                ]
-                            }
-                        ],
-                        'temperature': 0.1,
-                        'max_tokens': 200,
-                    },
+                    json=body,
                     timeout=60,
                 )
                 resp.raise_for_status()

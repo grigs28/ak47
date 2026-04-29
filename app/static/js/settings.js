@@ -1,9 +1,8 @@
 const CONFIG_GROUPS = {
     ocr: ['paddleocr_base_url', 'paddleocr_api_key'],
-    ai: ['qwen_base_url', 'qwen_api_key', 'qwen_model', 'ai_enabled'],
+    ai: ['qwen_base_url', 'qwen_api_key', 'qwen_model', 'ai_enabled', 'vl_think'],
     auth: ['yz_login_url'],
     db: ['db_host', 'db_port', 'db_name', 'db_user', 'db_password'],
-    scan: ['scan_threads', 'scan_exclude_dirs'],
 };
 
 let allConfigs = {};
@@ -18,11 +17,13 @@ function loadConfigs() {
             });
 
             Object.keys(CONFIG_GROUPS).forEach(g => {
-                document.getElementById(g + '-configs').innerHTML = '';
+                const el = document.getElementById(g + '-configs');
+                if (el) el.innerHTML = '';
             });
 
             Object.keys(CONFIG_GROUPS).forEach(group => {
                 const container = document.getElementById(group + '-configs');
+                if (!container) return;
                 CONFIG_GROUPS[group].forEach(key => {
                     const c = allConfigs[key];
                     if (!c) return;
@@ -35,7 +36,7 @@ function loadConfigs() {
 
 function createConfigElement(c) {
     const isSecret = c.key.includes('password') || c.key.includes('api_key');
-    const isBool = c.value === 'true' || c.value === 'false' || c.key === 'ai_enabled';
+    const isBool = c.value === 'true' || c.value === 'false' || c.key === 'ai_enabled' || c.key === 'vl_think';
     const div = document.createElement('div');
     div.className = 'mb-3';
 
