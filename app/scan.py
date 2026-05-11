@@ -2,6 +2,7 @@ import os
 import threading
 from app.smb import SMBManager
 from app.models import ScanProgress, SystemConfig
+from app.db import execute
 
 
 class Scanner:
@@ -11,6 +12,8 @@ class Scanner:
 
     def scan_all(self):
         """扫描入口：遍历目录，发现PDF后批量发送Celery任务到Redis队列"""
+        import json
+
         # 加载设计编号缓存到内存
         from app.vision.models import design_cache_memory
         design_cache_memory.load_from_db()
@@ -21,70 +24,18 @@ class Scanner:
             ScanProgress.reset()
             progress = ScanProgress.get()
 
-        # 读取排除目录配置
-        exclude_dirs = self._get_exclude_dirs()
-        print(f"[INFO] 排除目录: {exclude_dirs}")
-
-        # 读取选中的目录列表
-        selected_dirs = self._get_selected_dirs()
-        if selected_dirs is not None:
-            print(f"[INFO] 指定扫描目录: {len(selected_dirs)} 个")
+        # 尝试从 DB 恢复固定的目录列表（resume 场景）
+        dir_list_json = progress.get('dir_list')
+        if dir_list_json:
+            dirs = json.loads(dir_list_json)
+            total_dirs = progress.get('total_dirs', len(dirs))
+            skipped_dirs = progress.get('skipped_dirs', 0)
+            print(f"[INFO] 从DB恢复目录列表: {len(dirs)} 个目录")
         else:
-            print(f"[INFO] 未指定目录，扫描全部")
-
-        # 读取年份筛选
-        year_filter = self._get_year_filter()
-        if year_filter:
-            print(f"[INFO] 年份筛选: 跳过修改时间早于 {year_filter} 年的目录")
-
-        # 如果指定了目录，需要取全部来匹配
-        page_size = 20
-        if selected_dirs is not None:
-            page_size = max(20, len(selected_dirs) + 10)
-
-        dirs, total_dirs = self.smb.list_dirs(page=1, size=page_size)
-
-        # 如果选中目录仍有遗漏，继续翻页
-        if selected_dirs is not None:
-            found = {d for d, m in dirs}
-            missing = set(selected_dirs) - found
-            page = 2
-            while missing:
-                more_dirs, _ = self.smb.list_dirs(page=page, size=page_size)
-                if not more_dirs:
-                    break
-                dirs.extend(more_dirs)
-                found.update(d for d, m in more_dirs)
-                missing = set(selected_dirs) - found
-                page += 1
-
-        # 统计跳过前的总数
-        before_filter = len(dirs)
-
-        # 过滤排除目录
-        dirs = [(d, m) for d, m in dirs if d not in exclude_dirs]
-
-        # 过滤只保留选中的目录
-        if selected_dirs is not None:
-            selected_set = set(selected_dirs)
-            dirs = [(d, m) for d, m in dirs if d in selected_set]
-
-        # 年份筛选：跳过修改时间早于指定年份的目录
-        if year_filter:
-            from datetime import datetime
-            year_start = datetime(year_filter, 1, 1).timestamp()
-            dirs = [(d, m) for d, m in dirs if m >= year_start]
-
-        skipped_dirs = before_filter - len(dirs)
-        print(f"[INFO] 过滤后目录数: {len(dirs)}, 跳过: {skipped_dirs}")
-
-        ScanProgress.update(
-            status='running',
-            total_dirs=total_dirs,
-            skipped_dirs=skipped_dirs,
-            total_files=0,
-            started_at='NOW()',
-        )
+            # 首次扫描：获取并固定目录列表
+            dirs, total_dirs, skipped_dirs = self._fetch_and_fix_dirs()
+            # 存到 DB，后续 resume 复用
+            ScanProgress.update(dir_list=json.dumps(dirs, ensure_ascii=False))
 
         start_dir_idx = progress.get('dir_index', 0)
         scanned = progress.get('scanned_files', 0)
@@ -156,14 +107,82 @@ class Scanner:
 
         return {'status': 'completed', 'scanned': scanned, 'matched': matched}
 
+    def _fetch_and_fix_dirs(self):
+        """首次扫描时获取目录列表并固定，返回 (dirs, total_dirs, skipped_dirs)"""
+        # 读取排除目录配置
+        exclude_dirs = self._get_exclude_dirs()
+        print(f"[INFO] 排除目录: {exclude_dirs}")
+
+        # 读取选中的目录列表
+        selected_dirs = self._get_selected_dirs()
+        if selected_dirs is not None:
+            print(f"[INFO] 指定扫描目录: {len(selected_dirs)} 个")
+        else:
+            print(f"[INFO] 未指定目录，扫描全部")
+
+        # 读取年份筛选
+        year_filter = self._get_year_filter()
+        if year_filter:
+            print(f"[INFO] 年份筛选: 跳过修改时间早于 {year_filter} 年的目录")
+
+        # 如果指定了目录，需要取全部来匹配
+        page_size = 20
+        if selected_dirs is not None:
+            page_size = max(20, len(selected_dirs) + 10)
+
+        dirs, total_dirs = self.smb.list_dirs(page=1, size=page_size)
+
+        # 如果选中目录仍有遗漏，继续翻页
+        if selected_dirs is not None:
+            found = {d for d, m in dirs}
+            missing = set(selected_dirs) - found
+            page = 2
+            while missing:
+                more_dirs, _ = self.smb.list_dirs(page=page, size=page_size)
+                if not more_dirs:
+                    break
+                dirs.extend(more_dirs)
+                found.update(d for d, m in more_dirs)
+                missing = set(selected_dirs) - found
+                page += 1
+
+        # 统计跳过前的总数
+        before_filter = len(dirs)
+
+        # 过滤排除目录
+        dirs = [(d, m) for d, m in dirs if d not in exclude_dirs]
+
+        # 过滤只保留选中的目录
+        if selected_dirs is not None:
+            selected_set = set(selected_dirs)
+            dirs = [(d, m) for d, m in dirs if d in selected_set]
+
+        # 年份筛选：跳过修改时间早于指定年份的目录
+        if year_filter:
+            from datetime import datetime
+            year_start = datetime(year_filter, 1, 1).timestamp()
+            dirs = [(d, m) for d, m in dirs if m >= year_start]
+
+        skipped_dirs = before_filter - len(dirs)
+        print(f"[INFO] 过滤后目录数: {len(dirs)}, 跳过: {skipped_dirs}")
+
+        ScanProgress.update(
+            total_dirs=total_dirs,
+            skipped_dirs=skipped_dirs,
+            total_files=0,
+            started_at='NOW()',
+        )
+
+        return dirs, total_dirs, skipped_dirs
+
     def _scan_and_dispatch(self, dirname):
         """扫描目录中的PDF文件，批量发送Celery任务
-        策略：和原来一样，不等扫描结束，凑够 阈值（线程数×3）就发
+        策略：和原来一样，不等扫描结束，凑够 阈值（线程数×10）就发
         每个 PDF = 1 个独立 Celery 任务，由 16 个 prefork worker 并行消费
         """
         num_threads = int(SystemConfig.get('scan_threads', '10'))
         num_threads = max(1, num_threads)
-        threshold = num_threads * 3
+        threshold = num_threads * 10
 
         mount_path = self.smb._find_mount_path_for_dir(dirname)
         if not mount_path:
@@ -260,12 +279,18 @@ class Scanner:
     def _wait_for_tasks(self, task_ids, dirname):
         """通过DB计数器轮询等待所有Celery任务完成
         不逐个检查AsyncResult（上万任务太慢），而是看DB的scanned_files是否追平total_files
+        超时保护：超过 max_wait 秒无进展则强制推进
         """
         import time
 
         total = len(task_ids)
         if total == 0:
             return
+
+        max_wait = 300  # 最多等待 5 分钟无进展
+        start = time.time()
+        last_scanned = -1
+        stale_count = 0
 
         print(f"[INFO] 等待 {total} 个任务完成...")
 
@@ -289,8 +314,18 @@ class Scanner:
                 print(f"[INFO] 所有任务完成: scanned={scanned}, matched={matched}")
                 break
 
-            # 超时保护：最多等待 2 小时
-            # 通过检查DB更新时间判断是否还有活动
+            # 超时保护：如果 scanned 没变化累计超过 max_wait 秒，强制补齐
+            if scanned != last_scanned:
+                last_scanned = scanned
+                stale_count = 0
+            else:
+                stale_count += 2  # sleep(2)
+
+            if stale_count >= max_wait:
+                print(f"[WARN] 等待超时 ({max_wait}s 无进展)，强制补齐 scanned={scanned} -> {total_files}")
+                execute("UPDATE scan_progress SET scanned_files = total_files WHERE id = 1")
+                break
+
             time.sleep(2)
 
     def _get_exclude_dirs(self):

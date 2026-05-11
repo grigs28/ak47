@@ -46,7 +46,7 @@ class SMBManager:
                 s['server'] = cls._get_common_config()['server']
             mount_path = cls._get_mount_path_for_share(s)
             s['mount_path'] = mount_path
-            s['mounted'] = os.path.ismount(mount_path) if mount_path else False
+            s['mounted'] = cls._is_cifs_mounted(mount_path) if mount_path else False
         return shares
 
     # 挂载基础目录：Docker容器用 /mnt/smb，本地用 ~/mnt/ak47
@@ -106,6 +106,21 @@ class SMBManager:
         cls._mount_points.clear()
 
     @classmethod
+    def _is_cifs_mounted(cls, mount_path):
+        """检查 /proc/mounts 中是否有 cifs 挂载到指定路径"""
+        real_mp = os.path.realpath(mount_path)
+        try:
+            with open('/proc/mounts', 'r') as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[2] == 'cifs':
+                        if os.path.realpath(parts[1]) == real_mp:
+                            return True
+        except Exception:
+            pass
+        return False
+
+    @classmethod
     def mount_share(cls, share):
         """挂载单个共享路径"""
         cfg = cls._get_common_config()
@@ -113,8 +128,8 @@ class SMBManager:
         share_path = share.get('share', '')
         mount_path = cls._get_mount_path_for_share(share)
 
-        # 已挂载
-        if os.path.ismount(mount_path):
+        # 检查 /proc/mounts 里是否有真实的 cifs 挂载
+        if cls._is_cifs_mounted(mount_path):
             cls._mount_points[share.get('id', 0)] = mount_path
             return True
 
@@ -122,17 +137,20 @@ class SMBManager:
 
         share_clean = share_path.lstrip('\\').replace('\\', '/')
         share_url = f"//{server}/{share_clean}"
-        opts = f"vers=3.0,sec=ntlmssp,username={cfg['username']},password={cfg['password']},uid={os.getuid()},gid={os.getgid()},file_mode=0777,dir_mode=0777,ro"
-        if cfg['domain']:
-            opts += f",domain={cfg['domain']}"
 
-        # Docker 容器内直接 mount，本地用 sudo
-        if os.path.exists('/.dockerenv'):
-            cmd = ['mount', '-t', 'cifs', share_url, mount_path, '-o', opts]
-            result = subprocess.run(cmd, capture_output=True, text=True)
-        else:
-            cmd = ['sudo', '-S', 'mount', '-t', 'cifs', share_url, mount_path, '-o', opts]
-            result = subprocess.run(cmd, capture_output=True, text=True, input='Slnwg123$\n')
+        # 用 credentials 文件避免密码特殊字符（如$）在命令行中被 shell 吞掉
+        cred_path = '/tmp/.smbcred_' + str(share.get('id', 0))
+        with open(cred_path, 'w') as f:
+            f.write(f"username={cfg['username']}\n")
+            f.write(f"password={cfg['password']}\n")
+            if cfg['domain']:
+                f.write(f"domain={cfg['domain']}\n")
+        os.chmod(cred_path, 0o600)
+
+        opts = f"vers=3.0,credentials={cred_path},uid={os.getuid()},gid={os.getgid()},file_mode=0777,dir_mode=0777,ro"
+
+        cmd = ['mount', '-t', 'cifs', share_url, mount_path, '-o', opts]
+        result = subprocess.run(cmd, capture_output=True, text=True)
 
         if result.returncode != 0:
             raise RuntimeError(f"SMB mount failed: {result.stderr}")
@@ -160,11 +178,8 @@ class SMBManager:
         shares = cls.get_shares()
         for s in shares:
             mount_path = s.get('mount_path', '')
-            if mount_path and os.path.ismount(mount_path):
-                if os.path.exists('/.dockerenv'):
-                    subprocess.run(['umount', mount_path], capture_output=True, text=True)
-                else:
-                    subprocess.run(['sudo', '-S', 'umount', mount_path], capture_output=True, text=True, input='Slnwg123$\n')
+            if mount_path and cls._is_cifs_mounted(mount_path):
+                subprocess.run(['umount', '-f', '-l', mount_path], capture_output=True, text=True)
         cls._mount_points.clear()
 
     @classmethod

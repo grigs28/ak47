@@ -513,15 +513,18 @@ function loadSMBDirs(page) {
                 tbody.innerHTML = data.items.map(d => {
                     const mtime = d.mtime ? new Date(d.mtime * 1000).toLocaleString() : '-';
                     let statusBadge = '';
+                    let rowClass = '';
                     if (d.status === 'completed') {
-                        statusBadge = '<span class="badge bg-success">已完成</span>';
+                        statusBadge = '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>已完成</span>';
+                        rowClass = ' class="table-success"';
                     } else if (d.status === 'scanning') {
-                        statusBadge = '<span class="badge bg-warning text-dark">扫描中</span>';
+                        statusBadge = '<span class="badge bg-warning text-dark"><i class="bi bi-arrow-repeat me-1"></i>扫描中</span>';
+                        rowClass = ' class="table-warning"';
                     } else {
                         statusBadge = '<span class="badge bg-secondary">待扫描</span>';
                     }
                     const checked = selectedDirs.has(d.name) ? 'checked' : '';
-                    return '<tr><td><input type="checkbox" class="form-check-input dir-checkbox" data-name="' + escapeHtml(d.name) + '" ' + checked + ' onchange="toggleDir(\'' + escapeHtml(d.name).replace(/'/g, "\\'") + '\', this.checked)"></td><td>' + escapeHtml(d.name) + '</td><td>' + mtime + '</td><td>' + statusBadge + '</td></tr>';
+                    return '<tr' + rowClass + '><td><input type="checkbox" class="form-check-input dir-checkbox" data-name="' + escapeHtml(d.name) + '" ' + checked + ' onchange="toggleDir(\'' + escapeHtml(d.name).replace(/'/g, "\\'") + '\', this.checked)"></td><td>' + escapeHtml(d.name) + '</td><td>' + mtime + '</td><td>' + statusBadge + '</td></tr>';
                 }).join('');
                 document.getElementById('smb-dirs-section').classList.remove('d-none');
                 document.getElementById('smb-not-mounted').classList.add('d-none');

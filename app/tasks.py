@@ -8,10 +8,15 @@ from app.db import execute
 @celery.task(bind=True, max_retries=3)
 def scan_task(self):
     """后台扫描任务：遍历目录 + 派发PDF任务"""
-    # 自动挂载 SMB
+    # 先卸载再重新挂载 SMB，确保使用最新配置
     from app.smb import SMBManager
     try:
+        SMBManager.umount_all()
+    except Exception:
+        pass
+    try:
         SMBManager.mount_all()
+        print(f"[INFO] SMB 挂载成功")
     except Exception as e:
         print(f"[WARN] SMB 挂载失败: {e}")
 
@@ -93,6 +98,19 @@ def process_pdf_task(self, pdf, dirname):
             is_instruction, confidence = classifier.classify(crop_path)
             if is_instruction:
                 print(f"[Worker {worker_id}] {filename} | 分类器=说明 | 区域={region} | 置信度={confidence:.2f}")
+                break
+
+    # 文本路径没找到说明 → VL 视觉分类器兜底
+    if not is_instruction and source == 'text':
+        from app.vision.utils import pdf_page_to_image, crop_image_region, get_crop_strategy
+        classifier = InstructionClassifier()
+        image_path = pdf_page_to_image(file_path, page=1, dpi=200)
+        strategies = get_crop_strategy(image_path)
+        for region in strategies:
+            crop_path = crop_image_region(image_path, region=region)
+            is_instruction, confidence = classifier.classify(crop_path)
+            if is_instruction:
+                print(f"[Worker {worker_id}] {filename} | VL兜底=说明 | 区域={region} | 置信度={confidence:.2f}")
                 break
 
     # 不是说明 → 跳过
@@ -227,9 +245,23 @@ def _check_standard_match(file_path):
         if all(kw in compact_lower for kw in keywords):
             return True
 
+        # DEBUG: 打印匹配失败原因
+        import os as _os
+        fname = _os.path.basename(file_path)
+        missing = [kw for kw in keywords if kw not in compact_lower]
+        print(f"[DEBUG] 文本匹配失败: {fname} | text_len={len(text)} | missing_kw={missing}")
+        if len(text) > 0:
+            for kw in missing:
+                # 找最接近的
+                if '50378' in kw:
+                    idx = compact_lower.find('50378')
+                    if idx >= 0:
+                        print(f"  found '50378' at pos {idx}: ...{compact_lower[max(0,idx-20):idx+20]}...")
+
         # === 第2步：VL 视觉识别匹配（文本不够或匹配失败）===
         return _vl_check_standard(file_path, keywords)
-    except Exception:
+    except Exception as e:
+        print(f"[DEBUG] _check_standard_match exception: {e}")
         return False
 
 
@@ -273,9 +305,12 @@ def _vl_check_standard(file_path, keywords):
             resp.raise_for_status()
             content = resp.json()['choices'][0]['message'].get('content', '')
             compact = content.replace(' ', '').replace('\u3000', '').lower()
+            missing = [kw for kw in keywords if kw not in compact]
+            print(f"[DEBUG] VL page={page} response: {content[:200]} | compact: {compact[:200]} | missing={missing}")
             if all(kw in compact for kw in keywords):
                 return True
-        except Exception:
+        except Exception as e:
+            print(f"[DEBUG] VL page={page} exception: {e}")
             continue
 
     return False

@@ -245,6 +245,9 @@ class InfoExtractor:
         filename = os.path.basename(pdf_path)
         t0 = time.time()
 
+        # 文件名含"说明"关键词 → 标记为说明
+        filename_is_instruction = any(kw in filename for kw in INSTRUCTION_KEYWORDS)
+
         file_size = os.path.getsize(pdf_path)
 
         # >= 1024KB 直接走视觉（大CAD矢量PDF文本提取太慢）
@@ -260,6 +263,9 @@ class InfoExtractor:
         # < 1024KB 先文本提取
         result = self._extract_from_text(pdf_path)
         if result:
+            # 文件名含"说明"但文本没匹配到 → 文件名兜底
+            if not result.get('is_instruction') and filename_is_instruction:
+                result['is_instruction'] = True
             design_number = result.get('设计编号')
             elapsed = time.time() - t0
             fields_summary = '/'.join(
