@@ -154,52 +154,24 @@ def process_pdf_task(self, pdf, dirname):
 
     # ====== 步骤4: 标准匹配 → OCR入库 ======
     ocr = VisionOCRClient()
-    cache_hit = design_cache_memory.should_skip(design_number)
 
-    if cache_hit:
-        try:
-            task_id, md_content = ocr.process_file(file_path)
-            _save_to_formal(pdf, dirname, info, md_content, is_instruction=True, ocr_task_id=task_id)
-            if temp_id:
-                TempFile.delete(temp_id)
-            elapsed_total = time.time() - t_start
-            print(f"[Worker {worker_id}] {filename} | 缓存命中→OCR入库 | 总耗时={elapsed_total:.1f}s")
-            _increment_matched(dirname)
-            return {'status': 'matched'}
-        except Exception as e:
-            elapsed_total = time.time() - t_start
-            print(f"[Worker {worker_id}] {filename} | OCR失败 | {elapsed_total:.1f}s | {e}")
-            if temp_id:
-                TempFile.delete(temp_id)
-            _increment_matched(dirname)
-            return {'status': 'ocr_error'}
-
-    # 未缓存 → OCR找【】
-    print(f"[Worker {worker_id}] {filename} | 设计编号={design_number} 首次出现，OCR找【】")
-    result = ocr.process_and_check(file_path)
-
-    if result['has_brackets']:
-        design_cache_memory.mark(design_number)
-        _save_to_formal(
-            pdf, dirname, info,
-            result['md_content'],
-            is_instruction=True,
-            ocr_task_id=result['task_id'],
-        )
+    try:
+        task_id, md_content = ocr.process_file(file_path)
+        _save_to_formal(pdf, dirname, info, md_content, is_instruction=True, ocr_task_id=task_id)
         if temp_id:
             TempFile.delete(temp_id)
+        design_cache_memory.mark(design_number)
         elapsed_total = time.time() - t_start
-        print(f"[Worker {worker_id}] {filename} | 找到【】标记={design_number}→入库 | 总耗时={elapsed_total:.1f}s")
+        print(f"[Worker {worker_id}] {filename} | 标准匹配→OCR入库 | 总耗时={elapsed_total:.1f}s | 设计编号={design_number}")
         _increment_matched(dirname)
         return {'status': 'matched'}
-
-    # 没找到【】→ 跳过，删临时
-    elapsed_total = time.time() - t_start
-    print(f"[Worker {worker_id}] {filename} | OCR未找到【】 | 跳过 | 总耗时={elapsed_total:.1f}s | 设计编号={design_number}")
-    if temp_id:
-        TempFile.delete(temp_id)
-    _increment_scanned(dirname)
-    return {'status': 'no_brackets'}
+    except Exception as e:
+        elapsed_total = time.time() - t_start
+        print(f"[Worker {worker_id}] {filename} | OCR失败 | {elapsed_total:.1f}s | {e}")
+        if temp_id:
+            TempFile.delete(temp_id)
+        _increment_scanned(dirname)
+        return {'status': 'ocr_error'}
 
 
 def _increment_scanned(dirname):
