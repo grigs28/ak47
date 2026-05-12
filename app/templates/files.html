@@ -2,183 +2,333 @@
 
 {% block title %}文件列表 - PDF 扫描器{% endblock %}
 
+{% block extra_css %}
+<style>
+.tree-group { border: 1px solid #dee2e6; border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
+.tree-header {
+    padding: 10px 15px;
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.tree-header:hover { filter: brightness(0.97); }
+.tree-header.project { background: #e8f4f8; font-weight: 600; }
+.tree-header.category { background: #f0f0f0; padding-left: 40px; font-size: 14px; }
+.tree-toggle { font-size: 12px; color: #6c757d; width: 16px; text-align: center; }
+.tree-count { color: #6c757d; font-size: 13px; font-weight: normal; }
+.tree-body.collapsed { display: none; }
+.tree-file {
+    padding: 7px 15px 7px 65px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-top: 1px solid #f0f0f0;
+    font-size: 14px;
+}
+.tree-file:hover { background: #f8f9ff; }
+.tree-file.selected-row { background: #d1e7dd; }
+.tree-file .fname { flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-file .fsize { color: #6c757d; min-width: 55px; text-align: right; font-size: 13px; }
+.empty-msg { text-align: center; color: #6c757d; padding: 40px; }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h3>匹配文件列表</h3>
     <div>
-        <button class="btn btn-primary" onclick="downloadPackage()">打包下载</button>
-        <button class="btn btn-success" onclick="batchSelect(true)">批量选中</button>
-        <button class="btn btn-outline-secondary" onclick="batchSelect(false)">取消选中</button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="toggleExpandAll()">展开/折叠</button>
+        <button class="btn btn-primary btn-sm" onclick="downloadPackage()">
+            <i class="bi bi-download"></i> 打包下载
+        </button>
     </div>
 </div>
 
 <div class="card mb-3">
-    <div class="card-body">
-        <div class="row g-2">
+    <div class="card-body py-2">
+        <div class="row g-2 align-items-center">
             <div class="col-md-3">
-                <select id="filter-dir" class="form-select" onchange="loadFiles()">
+                <select id="filter-dir" class="form-select form-select-sm" onchange="loadFiles()">
                     <option value="">所有目录</option>
                 </select>
             </div>
-            <div class="col-md-3">
-                <select id="filter-ai" class="form-select" onchange="loadFiles()">
-                    <option value="">AI 匹配状态</option>
-                    <option value="true">已匹配</option>
-                    <option value="false">未匹配</option>
-                </select>
+            <div class="col-md-2">
+                <input type="text" id="filter-search" class="form-control form-control-sm" placeholder="搜索文件名/编号" oninput="loadFiles()">
             </div>
-            <div class="col-md-3">
-                <select id="filter-selected" class="form-select" onchange="loadFiles()">
+            <div class="col-md-2">
+                <select id="filter-selected" class="form-select form-select-sm" onchange="loadFiles()">
                     <option value="">选中状态</option>
                     <option value="true">已选中</option>
                     <option value="false">未选中</option>
                 </select>
             </div>
+            <div class="col-md-2 text-end">
+                <span id="total-info" class="text-muted" style="font-size:13px"></span>
+            </div>
         </div>
     </div>
 </div>
 
-<table class="table table-hover">
-    <thead>
-        <tr>
-            <th><input type="checkbox" id="select-all" onchange="toggleAll()"></th>
-            <th>文件名</th>
-            <th>目录</th>
-            <th>大小</th>
-            <th>AI 匹配</th>
-            <th>【】检测</th>
-            <th>操作</th>
-        </tr>
-    </thead>
-    <tbody id="file-list"></tbody>
-</table>
-
-<nav>
-    <ul class="pagination" id="pagination"></ul>
-</nav>
+<div id="file-tree"></div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-let currentPage = 1;
 let selectedIds = new Set();
+let allExpanded = true;
 
-function loadFiles(page = 1) {
-    currentPage = page;
-    const params = new URLSearchParams({page, size: 20});
+function loadFiles() {
+    const params = new URLSearchParams({page: 1, size: 99999});
     const dir = document.getElementById('filter-dir').value;
-    const ai = document.getElementById('filter-ai').value;
     const sel = document.getElementById('filter-selected').value;
     if (dir) params.append('directory', dir);
-    if (ai) params.append('ai_matched', ai);
     if (sel) params.append('selected', sel);
 
     fetch('/api/files?' + params)
         .then(r => r.json())
         .then(data => {
-            const tbody = document.getElementById('file-list');
-            tbody.innerHTML = data.files.map(f => `
-                <tr class="${f.selected ? 'file-selected' : ''}">
-                    <td><input type="checkbox" value="${f.id}" ${selectedIds.has(f.id) ? 'checked' : ''} onchange="toggleSelect(${f.id})"></td>
-                    <td><a href="/files/${f.id}">${escapeHtml(f.filename)}</a></td>
-                    <td>${escapeHtml(f.directory)}</td>
-                    <td>${formatSize(f.file_size)}</td>
-                    <td>${f.ai_confidence ? (f.ai_confidence * 100).toFixed(0) + '%' : '-'}</td>
-                    <td>${f.has_brackets ? '是' : '否'}</td>
-                    <td>
-                        <a href="/api/files/${f.id}/preview" target="_blank" class="btn btn-sm btn-outline-primary">预览</a>
-                        <a href="/api/files/${f.id}/md" class="btn btn-sm btn-outline-success">下载 MD</a>
-                    </td>
-                </tr>
-            `).join('');
+            let files = data.files || [];
 
-            renderPagination(data.total, data.page, data.size);
+            // 客户端搜索过滤
+            const q = document.getElementById('filter-search').value.trim().toLowerCase();
+            if (q) {
+                files = files.filter(f =>
+                    (f.filename || '').toLowerCase().includes(q) ||
+                    (f['设计编号'] || '').toLowerCase().includes(q) ||
+                    (f['工程名称'] || '').toLowerCase().includes(q) ||
+                    (f['图别'] || '').toLowerCase().includes(q)
+                );
+            }
+
+            document.getElementById('total-info').textContent = '\u5171 ' + files.length + ' \u4e2a\u6587\u4ef6';
+            renderTree(files);
         });
 }
 
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
+function renderTree(files) {
+    // 按 工程名称-设计编号 → 图别 分组
+    const groups = {};
+    files.forEach(f => {
+        const project = ((f['工程名称'] || '未知') + '-' + (f['设计编号'] || '未知'));
+        const category = f['图别'] || '其他';
+        if (!groups[project]) groups[project] = {};
+        if (!groups[project][category]) groups[project][category] = [];
+        groups[project][category].push(f);
+    });
 
-function formatSize(bytes) {
-    if (!bytes) return '-';
-    const units = ['B', 'KB', 'MB', 'GB'];
-    let i = 0;
-    while (bytes >= 1024 && i < units.length - 1) {
-        bytes /= 1024;
-        i++;
+    const container = document.getElementById('file-tree');
+    container.textContent = '';
+
+    if (!files.length) {
+        var emptyDiv = document.createElement('div');
+        emptyDiv.className = 'empty-msg';
+        emptyDiv.textContent = '暂无匹配文件';
+        container.appendChild(emptyDiv);
+        return;
     }
-    return bytes.toFixed(1) + ' ' + units[i];
-}
 
-function renderPagination(total, page, size) {
-    const pages = Math.ceil(total / size);
-    let html = '';
-    for (let i = 1; i <= pages; i++) {
-        html += `<li class="page-item ${i === page ? 'active' : ''}"><a class="page-link" href="#" onclick="loadFiles(${i})">${i}</a></li>`;
+    for (const [project, categories] of Object.entries(groups)) {
+        const totalFiles = Object.values(categories).flat();
+        const projectIds = totalFiles.map(f => f.id);
+        const allProjectSelected = projectIds.length > 0 && projectIds.every(id => selectedIds.has(id));
+
+        var groupDiv = document.createElement('div');
+        groupDiv.className = 'tree-group';
+
+        // Project header
+        var projHeader = document.createElement('div');
+        projHeader.className = 'tree-header project';
+        projHeader.onclick = function() { toggleBody(this); };
+
+        var arrow1 = document.createElement('span');
+        arrow1.className = 'tree-toggle';
+        arrow1.textContent = '\u25BC';
+
+        var projCb = document.createElement('input');
+        projCb.type = 'checkbox';
+        projCb.checked = allProjectSelected;
+        projCb.onclick = function(e) { e.stopPropagation(); toggleProject(this, projectIds); };
+
+        var projLabel = document.createElement('span');
+        projLabel.textContent = project;
+
+        var projCount = document.createElement('span');
+        projCount.className = 'tree-count';
+        projCount.textContent = totalFiles.length + ' 个文件';
+
+        projHeader.appendChild(arrow1);
+        projHeader.appendChild(projCb);
+        projHeader.appendChild(projLabel);
+        projHeader.appendChild(projCount);
+
+        var projBody = document.createElement('div');
+        projBody.className = 'tree-body';
+
+        for (const [category, catFiles] of Object.entries(categories)) {
+            const catIds = catFiles.map(f => f.id);
+            const allCatSelected = catIds.length > 0 && catIds.every(id => selectedIds.has(id));
+
+            var catDiv = document.createElement('div');
+
+            var catHeader = document.createElement('div');
+            catHeader.className = 'tree-header category';
+            catHeader.onclick = function() { toggleBody(this); };
+
+            var arrow2 = document.createElement('span');
+            arrow2.className = 'tree-toggle';
+            arrow2.textContent = '\u25BC';
+
+            var catCb = document.createElement('input');
+            catCb.type = 'checkbox';
+            catCb.checked = allCatSelected;
+            catCb.onclick = function(e) { e.stopPropagation(); toggleCategory(this, catIds); };
+
+            var catLabel = document.createElement('span');
+            catLabel.textContent = category;
+
+            var catCount = document.createElement('span');
+            catCount.className = 'tree-count';
+            catCount.textContent = catFiles.length;
+
+            catHeader.appendChild(arrow2);
+            catHeader.appendChild(catCb);
+            catHeader.appendChild(catLabel);
+            catHeader.appendChild(catCount);
+
+            var catBody = document.createElement('div');
+            catBody.className = 'tree-body';
+
+            catFiles.forEach(function(f) {
+                var fileRow = document.createElement('div');
+                fileRow.className = 'tree-file' + (f.selected ? ' selected-row' : '');
+
+                var fileCb = document.createElement('input');
+                fileCb.type = 'checkbox';
+                fileCb.checked = selectedIds.has(f.id);
+                fileCb.onchange = (function(fid) {
+                    return function() { toggleSelect(fid, this); };
+                })(f.id);
+
+                var fnameSpan = document.createElement('span');
+                fnameSpan.className = 'fname';
+                fnameSpan.title = f.filename;
+                var fnameLink = document.createElement('a');
+                fnameLink.href = '/files/' + f.id;
+                fnameLink.textContent = f.filename;
+                fnameSpan.appendChild(fnameLink);
+
+                var sizeSpan = document.createElement('span');
+                sizeSpan.className = 'fsize';
+                sizeSpan.textContent = formatSize(f.file_size);
+
+                var previewBtn = document.createElement('a');
+                previewBtn.href = '/api/files/' + f.id + '/preview';
+                previewBtn.target = '_blank';
+                previewBtn.className = 'btn btn-sm btn-outline-primary py-0 px-1';
+                previewBtn.style.fontSize = '12px';
+                previewBtn.textContent = '预览';
+
+                var mdBtn = document.createElement('a');
+                mdBtn.href = '/api/files/' + f.id + '/md';
+                mdBtn.className = 'btn btn-sm btn-outline-success py-0 px-1';
+                mdBtn.style.fontSize = '12px';
+                mdBtn.textContent = 'MD';
+
+                fileRow.appendChild(fileCb);
+                fileRow.appendChild(fnameSpan);
+                fileRow.appendChild(sizeSpan);
+                fileRow.appendChild(previewBtn);
+                fileRow.appendChild(mdBtn);
+                catBody.appendChild(fileRow);
+            });
+
+            catDiv.appendChild(catHeader);
+            catDiv.appendChild(catBody);
+            projBody.appendChild(catDiv);
+        }
+
+        groupDiv.appendChild(projHeader);
+        groupDiv.appendChild(projBody);
+        container.appendChild(groupDiv);
     }
-    document.getElementById('pagination').innerHTML = html;
 }
 
-function toggleSelect(id) {
-    if (selectedIds.has(id)) selectedIds.delete(id);
-    else selectedIds.add(id);
+function toggleBody(headerEl) {
+    var body = headerEl.nextElementSibling;
+    var arrow = headerEl.querySelector('.tree-toggle');
+    if (body.classList.contains('collapsed')) {
+        body.classList.remove('collapsed');
+        arrow.textContent = '\u25BC';
+    } else {
+        body.classList.add('collapsed');
+        arrow.textContent = '\u25B6';
+    }
 }
 
-function toggleAll() {
-    const checked = document.getElementById('select-all').checked;
-    document.querySelectorAll('#file-list input[type="checkbox"]').forEach(cb => {
-        cb.checked = checked;
-        const id = parseInt(cb.value);
-        if (checked) selectedIds.add(id);
-        else selectedIds.delete(id);
+function toggleExpandAll() {
+    allExpanded = !allExpanded;
+    document.querySelectorAll('.tree-body').forEach(function(el) {
+        if (allExpanded) el.classList.remove('collapsed');
+        else el.classList.add('collapsed');
+    });
+    document.querySelectorAll('.tree-toggle').forEach(function(el) {
+        el.textContent = allExpanded ? '\u25BC' : '\u25B6';
     });
 }
 
-function batchSelect(selected) {
-    const ids = Array.from(selectedIds);
-    if (ids.length === 0) return alert('请先选择文件');
+function toggleSelect(id, cb) {
+    if (cb.checked) selectedIds.add(id);
+    else selectedIds.delete(id);
+}
 
-    fetch('/api/files/batch-select', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({file_ids: ids, selected}),
-    }).then(() => {
-        selectedIds.clear();
-        loadFiles(currentPage);
-    });
+function toggleProject(cb, ids) {
+    if (cb.checked) ids.forEach(function(id) { selectedIds.add(id); });
+    else ids.forEach(function(id) { selectedIds.delete(id); });
+    loadFiles();
+}
+
+function toggleCategory(cb, ids) {
+    if (cb.checked) ids.forEach(function(id) { selectedIds.add(id); });
+    else ids.forEach(function(id) { selectedIds.delete(id); });
+    loadFiles();
 }
 
 function downloadPackage() {
-    const ids = Array.from(selectedIds);
-    if (ids.length === 0) return alert('请先选择文件');
-
+    var ids = Array.from(selectedIds);
+    if (!ids.length) return alert('请先选择文件');
     fetch('/api/files/download-package', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({file_ids: ids}),
-    }).then(r => {
-        if (!r.ok) return r.json().then(d => alert(d.error || '下载失败'));
+    }).then(function(r) {
+        if (!r.ok) return r.json().then(function(d) { throw new Error(d.error || '下载失败'); });
         return r.blob();
-    }).then(blob => {
+    }).then(function(blob) {
         if (!blob) return;
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'package.zip';
-        a.click();
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url; a.download = 'package.zip'; a.click();
         URL.revokeObjectURL(url);
-    });
+    }).catch(function(e) { alert(e.message); });
 }
 
+function formatSize(bytes) {
+    if (!bytes) return '-';
+    var units = ['B', 'KB', 'MB', 'GB'];
+    var i = 0;
+    while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
+    return bytes.toFixed(1) + ' ' + units[i];
+}
+
+// 加载目录选项
 fetch('/api/browse')
-    .then(r => r.json())
-    .then(data => {
-        const select = document.getElementById('filter-dir');
-        data.items.forEach(item => {
-            const opt = document.createElement('option');
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        var select = document.getElementById('filter-dir');
+        (data.items || []).forEach(function(item) {
+            var opt = document.createElement('option');
             opt.value = item.name;
             opt.textContent = item.name;
             select.appendChild(opt);
