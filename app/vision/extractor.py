@@ -178,23 +178,31 @@ class InfoExtractor:
             raise
 
     def _validate_design_number(self, design_number):
-        """验证设计编号必须包含 '-' """
+        """验证设计编号必须包含 '-' 且不是标准编号"""
         if not design_number:
             return False
-        return '-' in str(design_number)
+        dn = str(design_number)
+        if '-' not in dn:
+            return False
+        # 排除国家标准编号模式 (GB, GB/T, JGJ, CJJ, CECS 等)
+        if re.match(r'^(GB|JGJ|CJJ|HJ|DB|JB|YB|SL|DL|CECS|TB|JT|HG|SH|SY|NB)[/\\\s]?\d', dn, re.IGNORECASE):
+            return False
+        return True
 
     def _extract_from_vision(self, pdf_path, max_retries=2):
         """视觉识别兜底：转图片 → 裁图 → qwen-3"""
         image_path = pdf_page_to_image(pdf_path, page=1, dpi=200)
         strategies = get_crop_strategy(image_path)
 
-        prompt = """请从这张建筑图纸图片中提取以下字段：
-1. 建设单位
-2. 工程名称
-3. 设计编号（必须包含至少一个"-"）
-4. 图名
-5. 图号
-6. 图别
+        prompt = """请从这张建筑图纸的图签栏中提取以下字段：
+1. 建设单位 - 项目业主名称
+2. 工程名称 - 具体的工程项目名称
+3. 设计编号 - 项目内部设计编号（如S25-034-1、A2023-001），不是国家标准编号
+4. 图名 - 这张图纸的名称
+5. 图号 - 图纸编号
+6. 图别 - 专业类别（如建筑、结构、暖通、给排水、电施、装施等）
+
+注意：设计编号是项目内部编号，不能填国家标准编号（如GB/T50378-2019、GB55016-2021等）。
 
 按JSON格式返回：
 {"建设单位": "", "工程名称": "", "设计编号": "", "图名": "", "图号": "", "图别": ""}
