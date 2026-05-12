@@ -206,6 +206,8 @@ def _increment_matched(dirname):
 def _promote_temp_files(design_number, dirname):
     """将临时库中同设计编号的说明文件迁移到正式库（OCR + 入库 + 删除临时记录）"""
     from app.vision.models import TempFile
+    from app.vision import VisionOCRClient
+    from app.smb import SMBManager
     from app.models import ScannedFile
     from app.db import query
 
