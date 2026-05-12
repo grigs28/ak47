@@ -40,6 +40,8 @@
     <h3>匹配文件列表</h3>
     <div>
         <button class="btn btn-outline-secondary btn-sm" onclick="toggleExpandAll()">展开/折叠</button>
+        <button class="btn btn-success btn-sm" onclick="selectAll()">全选</button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="clearSelection()">全清</button>
         <button class="btn btn-primary btn-sm" onclick="downloadPackage()">
             <i class="bi bi-download"></i> 打包下载
         </button>
@@ -282,6 +284,22 @@ function toggleExpandAll() {
     document.querySelectorAll('.tree-toggle').forEach(function(el) {
         el.textContent = allExpanded ? '\u25BC' : '\u25B6';
     });
+}
+
+function selectAll() {
+    document.querySelectorAll('.tree-file input[type="checkbox"]').forEach(function(cb) {
+        cb.checked = true;
+        selectedIds.add(parseInt(cb.value));
+    });
+    document.querySelectorAll('.project-cb, .category-cb').forEach(function(cb) { cb.checked = true; });
+}
+
+function clearSelection() {
+    selectedIds.clear();
+    document.querySelectorAll('.tree-file input[type="checkbox"]').forEach(function(cb) {
+        cb.checked = false;
+    });
+    document.querySelectorAll('.project-cb, .category-cb').forEach(function(cb) { cb.checked = false; });
 }
 
 function toggleSelect(id, cb) {
