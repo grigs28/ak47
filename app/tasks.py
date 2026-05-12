@@ -144,7 +144,12 @@ def process_pdf_task(self, pdf, dirname):
         print(f"[Worker {worker_id}] 保存临时文件失败 {pdf['path']}: {e}")
 
     # ====== 步骤3: 标准名称匹配 ======
-    standard_match = _check_standard_match(file_path)
+    # 先检查设计编号缓存：该设计编号已有匹配 → 跳过标准检查
+    if design_cache_memory.should_skip(design_number):
+        standard_match = True
+        print(f"[Worker {worker_id}] {filename} | 设计编号缓存命中 | 跳过标准匹配 | 设计编号={design_number}")
+    else:
+        standard_match = _check_standard_match(file_path)
 
     if not standard_match:
         elapsed = time.time() - t_start
@@ -161,6 +166,10 @@ def process_pdf_task(self, pdf, dirname):
         if temp_id:
             TempFile.delete(temp_id)
         design_cache_memory.mark(design_number)
+        # 迁移同设计编号的临时文件到正式库
+        promoted = _promote_temp_files(design_number, dirname)
+        if promoted > 0:
+            print(f"[Worker {worker_id}] {filename} | 迁移 {promoted} 个同设计编号文件到正式库 | 设计编号={design_number}")
         elapsed_total = time.time() - t_start
         print(f"[Worker {worker_id}] {filename} | 标准匹配→OCR入库 | 总耗时={elapsed_total:.1f}s | 设计编号={design_number}")
         _increment_matched(dirname)
@@ -192,6 +201,61 @@ def _increment_matched(dirname):
         "current_dir = %s, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
         (dirname,)
     )
+
+
+def _promote_temp_files(design_number, dirname):
+    """将临时库中同设计编号的说明文件迁移到正式库（OCR + 入库 + 删除临时记录）"""
+    from app.vision.models import TempFile
+    from app.models import ScannedFile
+    from app.db import query
+
+    rows = query(
+        "SELECT * FROM temp_files WHERE 设计编号 = %s AND is_instruction = TRUE",
+        (design_number,), fetchall=True
+    )
+    if not rows:
+        return 0
+
+    ocr = VisionOCRClient()
+    promoted = 0
+
+    for row in rows:
+        try:
+            # 已在正式库则跳过
+            existing = ScannedFile.get_by_path(row['file_path'])
+            if existing:
+                TempFile.delete(row['id'])
+                continue
+
+            file_path = SMBManager.get_file_path(row['file_path'])
+
+            # OCR 处理
+            task_id, md_content = ocr.process_file(file_path)
+
+            info = {
+                '建设单位': row.get('建设单位'),
+                '工程名称': row.get('工程名称'),
+                '设计编号': row.get('设计编号'),
+                '图名': row.get('图名'),
+                '图号': row.get('图号'),
+                '图别': row.get('图别'),
+            }
+            _save_to_formal(
+                {'name': row['filename'], 'size': row['file_size'], 'path': row['file_path']},
+                row['directory'],
+                info,
+                md_content,
+                is_instruction=True,
+                ocr_task_id=task_id,
+            )
+
+            TempFile.delete(row['id'])
+            promoted += 1
+            print(f"[Promote] {row['filename']} | 设计编号={design_number} | 迁移成功")
+        except Exception as e:
+            print(f"[Promote] {row.get('filename', '?')} | 迁移失败: {e}")
+
+    return promoted
 
 
 def _check_standard_match(file_path):
@@ -291,6 +355,7 @@ def _vl_check_standard(file_path, keywords):
 def _save_to_formal(pdf, dirname, info, md_content, is_instruction=False, ocr_task_id=None):
     """保存到正式库"""
     import json
+    from app.models import ScannedFile
     ScannedFile.create(
         file_path=pdf['path'],
         directory=dirname,

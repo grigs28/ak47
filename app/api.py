@@ -261,6 +261,57 @@ def file_download_md(file_id):
         headers={'Content-Disposition': f'attachment; filename={filename}'},
     )
 
+
+@bp.route('/files/download-package', methods=['POST'])
+@admin_required
+def download_package():
+    """打包下载选中的文件：按 工程名称-设计编号/图别/ 组织 zip"""
+    import zipfile
+    import io
+    from app.db import query as db_query
+
+    data = request.get_json() or {}
+    file_ids = data.get('file_ids', [])
+    if not file_ids:
+        return jsonify({'error': '请选择文件'}), 400
+
+    placeholders = ','.join('%s' for _ in file_ids)
+    rows = db_query(
+        f"SELECT * FROM scanned_files WHERE id IN ({placeholders})",
+        file_ids, fetchall=True
+    )
+    if not rows:
+        return jsonify({'error': '文件不存在'}), 404
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for row in rows:
+            project = row.get('工程名称', 'unknown') or 'unknown'
+            design = row.get('设计编号', 'unknown') or 'unknown'
+            category = row.get('图别', '其他') or '其他'
+            dir_path = f"{project}-{design}/{category}"
+
+            # PDF
+            try:
+                file_path = SMBManager.get_file_path(row['file_path'])
+                zf.write(file_path, f"{dir_path}/{row['filename']}")
+            except Exception as e:
+                print(f"[Download] PDF 失败: {row['filename']} | {e}")
+
+            # MD
+            md_content = row.get('md_content', '')
+            if md_content:
+                md_name = row['filename'].replace('.pdf', '.md')
+                zf.writestr(f"{dir_path}/{md_name}", md_content)
+
+    buffer.seek(0)
+    from flask import Response
+    return Response(
+        buffer.getvalue(),
+        mimetype='application/zip',
+        headers={'Content-Disposition': 'attachment; filename=package.zip'},
+    )
+
 # === 目录浏览 ===
 
 @bp.route('/browse', methods=['GET'])
