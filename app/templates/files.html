@@ -223,6 +223,11 @@ function renderTree(files) {
                 sizeSpan.className = 'fsize';
                 sizeSpan.textContent = formatSize(f.file_size);
 
+                var stdSpan = document.createElement('span');
+                stdSpan.className = 'fsize';
+                stdSpan.style.minWidth = '50px';
+                stdSpan.textContent = f.has_brackets ? '通过' : '-';
+
                 var previewBtn = document.createElement('a');
                 previewBtn.href = '/api/files/' + f.id + '/preview';
                 previewBtn.target = '_blank';
@@ -239,6 +244,7 @@ function renderTree(files) {
                 fileRow.appendChild(fileCb);
                 fileRow.appendChild(fnameSpan);
                 fileRow.appendChild(sizeSpan);
+                fileRow.appendChild(stdSpan);
                 fileRow.appendChild(previewBtn);
                 fileRow.appendChild(mdBtn);
                 catBody.appendChild(fileRow);
